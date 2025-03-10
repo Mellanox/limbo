@@ -1,0 +1,36 @@
+FILE: exp/myExp/main.cpp
+
+opt_nloptnograd
+^^^^^^^^^^^^^^^
+- int iterations = 500 [defined in exp/myExp/main.cpp]<map object at 0xffff5f8cbd00>
+- double fun_tolerance = -1 [default value, from src/limbo/opt/nlopt_no_grad.hpp]<map object at 0xffff5f9189d0>
+- double xrel_tolerance = -1 [default value, from src/limbo/opt/nlopt_no_grad.hpp]<map object at 0xffff5f918880>
+
+bayes_opt_boptimizer
+^^^^^^^^^^^^^^^^^^^^
+- int hp_period = -1 [default value, from src/limbo/bayes_opt/boptimizer.hpp]<map object at 0xffff5f8cb580>
+
+bayes_opt_bobase
+^^^^^^^^^^^^^^^^
+- int stats_enabled = true [defined in exp/myExp/main.cpp]<map object at 0xffff5f8c8a60>
+- bool bounded = true [defined in exp/myExp/main.cpp]<map object at 0xffff5f8c8580>
+
+kernel
+^^^^^^
+- double noise = 1e-10 [defined in exp/myExp/main.cpp]<map object at 0xffff5f8c8430>
+- bool optimize_noise = false [default value, from src/limbo/kernel/kernel.hpp]<map object at 0xffff5f8d7250>
+
+stop_maxiterations
+^^^^^^^^^^^^^^^^^^
+- int iterations = 50 [defined in exp/myExp/main.cpp]<map object at 0xffff5f8c8c40>
+
+acqui_ucb
+^^^^^^^^^
+- double alpha = 1.96 [defined in exp/myExp/main.cpp]<map object at 0xffff5f8c9840>
+
+kernel_maternfivehalves
+^^^^^^^^^^^^^^^^^^^^^^^
+- double sigma_sq = 1 [defined in exp/myExp/main.cpp]<map object at 0xffff5f8c8700>
+- double l = 1 [defined in exp/myExp/main.cpp]<map object at 0xffff5f8c8e80>
+
+=========================================
