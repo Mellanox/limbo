@@ -16,10 +16,11 @@
 #include <unistd.h>
 #include <vector>
 //#include <limbo/acquisition/ucb.hpp>
-#include <limbo/kernel/matern_five_halves.hpp>
+#include <limbo/kernel/squared_exp_ard.hpp>
 #include <limbo/mean/constant.hpp>
 #include <limbo/opt/nlopt_grad.hpp>
-
+#include <limbo/limbo.hpp>
+#include <limbo/serialize/text_archive.hpp>
 using json = nlohmann::json;
 using namespace limbo;
 
@@ -264,22 +265,23 @@ struct Params {
   };
 
   struct bayes_opt_boptimizer : public defaults::bayes_opt_boptimizer {
-    BO_PARAM(int, hp_period, -1); // -1 means no hyperparameter optimization
+    BO_PARAM(int, hp_period, 1); // -1 means no hyperparameter optimization
   };
 
-  struct opt_nloptnograd : public defaults::opt_nloptnograd {
+  struct opt_nloptnograd : public defaults::opt_nloptnograd { // TODO: BO seems to get stuck at local point very quickly, need to swap acqusition optimizer?
     BO_PARAM(int, iterations, 500);
     BO_PARAM(double, learning_rate, 0.01);
     BO_PARAM(double, tolerance, 1e-6);
   };
 
   struct kernel : public defaults::kernel {
-    BO_PARAM(double, noise, 1e-10);
+    BO_PARAM(double, noise, 0.01);
+    BO_PARAM(bool, optimize_noise,true);
   };
 
-  struct kernel_maternfivehalves : public defaults::kernel_maternfivehalves {
+  struct kernel_squared_exp_ard : public defaults::kernel_squared_exp_ard{
     BO_PARAM(double, sigma_sq, 1);
-    BO_PARAM(double, l, 1);
+    BO_PARAM(int,k,0);
   };
 
   struct init_randomsampling {
@@ -287,11 +289,18 @@ struct Params {
   };
 
   struct stop_maxiterations {
-    BO_PARAM(int, iterations, 50);
+    BO_PARAM(int, iterations, 150);
   };
 
   struct acqui_ucb : public defaults::acqui_ucb {
-    BO_PARAM(double, alpha, 1.96);
+    BO_PARAM(double, alpha, 0.5);
+  };
+
+  struct opt_rprop : public defaults::opt_rprop { //TODO: hyperparameters can converge on extremely high lengthscales - need to investigate
+  };
+
+  struct mean_constant : public defaults::mean_constant {
+    BO_PARAM(double, constant, 0);
   };
 };
 
@@ -328,39 +337,87 @@ struct Eval {
   }
 };
 
+struct DummyEval {
+    // number of input dimension (x.size())
+    BO_PARAM(size_t, dim_in, 3);
+    // number of dimensions of the result (res.size())
+    BO_PARAM(size_t, dim_out, 1);
+
+    // the function to be optimized
+    Eigen::VectorXd operator()(const Eigen::VectorXd& x) const
+    {
+        //Optimal point is at (0.5, 0 , 0.3) (since optimization is bounded to [0,1]^3)
+        Eigen::VectorXd vec(3);
+        vec << 0.5, -0.5 , 0.3;//, 0,0;
+        double y = - (x-vec).norm() * 0.1;
+        // Add Gaussian noise to y
+        double noise_mean = 0.0;
+        double noise_stddev = 0.0;
+        std::random_device rd;
+        std::mt19937 gen(rd());
+        std::normal_distribution<> d(noise_mean, noise_stddev);
+        y += d(gen);
+        // we return a 1-dimensional vector
+        return tools::make_vector(y);
+    }
+};
+
 int main() {
   try {
     // Initialize RPC client
-    SnapRPC rpc;
+
 
     // Start timing
     auto start_time = std::chrono::high_resolution_clock::now();
 
+    using kernel_t = kernel::SquaredExpARD<Params>;
+    //using mean_t = mean::Data<Params>;
+    //using mean_t = mean:FunctionARD<Params, mean::Constant>;
+    using mean_t = mean::Constant<Params>;
+    using gp_opt_t = model::gp::KernelMeanLFOpt<Params>;
+    using gp_t = model::GP<Params, kernel_t, mean_t, gp_opt_t>;
+    using Acqui_t = acqui::UCB<Params, gp_t>;
     // Initialize and run optimizer
-    bayes_opt::BOptimizer<Params> optimizer;
-    optimizer.optimize(Eval(rpc));
+    bayes_opt::BOptimizer<Params,modelfun<gp_t>,acquifun<Acqui_t>> optimizer;
 
-    // End timing
-    auto end_time = std::chrono::high_resolution_clock::now();
-    double total_time =
-        std::chrono::duration<double>(end_time - start_time).count();
+    #ifdef USE_DUMMY
+      std::cout << "Optimizing Dummy function" << std::endl;
+      optimizer.optimize(DummyEval());
+    #else
+      std::cout << "Optimizing SNAP" << std::endl;
+      SnapRPC rpc;
+      optimizer.optimize(Eval(rpc));
+    #endif
 
-    // Print results
-    std::cout << "Optimization completed successfully!" << std::endl;
-    std::cout << "Total time: " << total_time << " seconds" << std::endl;
+      // End timing
+      auto end_time = std::chrono::high_resolution_clock::now();
+      double total_time =
+      std::chrono::duration<double>(end_time - start_time).count();
 
-    // Convert best sample to SNAP parameters
-    Eigen::VectorXd best_x = optimizer.best_sample();
-    SnapParams best_params = SnapParams::from_optimization_space(best_x);
+      // Print results
+      std::cout << "Optimization completed successfully!" << std::endl;
+      std::cout << "Total time: " << total_time << " seconds" << std::endl;
 
-    std::cout << "\nBest SNAP parameters:" << std::endl;
-    std::cout << "poll_size: " << best_params.poll_size << std::endl;
-    std::cout << "poll_ratio: " << best_params.poll_ratio << std::endl;
-    std::cout << "max_inflights: " << best_params.max_inflights << std::endl;
-    std::cout << "max_iog_batch: " << best_params.max_iog_batch << std::endl;
-    std::cout << "max_new_ios: " << best_params.max_new_ios << std::endl;
-    std::cout << "\nBest IOPS: " << optimizer.best_observation()(0)
-              << std::endl;
+      // Convert best sample to SNAP parameters
+      Eigen::VectorXd best_x = optimizer.best_sample();
+      std::cout << best_x << std::endl;
+
+    #ifndef USE_DUMMY
+      SnapParams best_params = SnapParams::from_optimization_space(best_x);
+
+      std::cout << "\nBest SNAP parameters:" << std::endl;
+      std::cout << "poll_size: " << best_params.poll_size << std::endl;
+      std::cout << "poll_ratio: " << best_params.poll_ratio << std::endl;
+      std::cout << "max_inflights: " << best_params.max_inflights << std::endl;
+      std::cout << "max_iog_batch: " << best_params.max_iog_batch << std::endl;
+      std::cout << "max_new_ios: " << best_params.max_new_ios << std::endl;
+      std::cout << "\nBest IOPS: " << optimizer.best_observation()(0)
+        << std::endl;
+    #endif
+
+    std::string save_directory = "gp_model";
+    gp_t gp_model = optimizer.model();
+    gp_model.save<serialize::TextArchive>(serialize::TextArchive(save_directory));
 
   } catch (const std::exception &e) {
     std::cerr << "Error during optimization: " << e.what() << std::endl;

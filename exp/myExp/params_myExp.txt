@@ -2,35 +2,93 @@ FILE: exp/myExp/main.cpp
 
 opt_nloptnograd
 ^^^^^^^^^^^^^^^
-- int iterations = 500 [defined in exp/myExp/main.cpp]<map object at 0xffff5f8cbd00>
-- double fun_tolerance = -1 [default value, from src/limbo/opt/nlopt_no_grad.hpp]<map object at 0xffff5f9189d0>
-- double xrel_tolerance = -1 [default value, from src/limbo/opt/nlopt_no_grad.hpp]<map object at 0xffff5f918880>
+- int iterations = 500 [defined in exp/myExp/main.cpp]<map object at 0xffff7b69b7f0>
+- double fun_tolerance = -1 [default value, from src/limbo/opt/nlopt_no_grad.hpp]<map object at 0xffff7b56cc10>
+- double xrel_tolerance = -1 [default value, from src/limbo/opt/nlopt_no_grad.hpp]<map object at 0xffff7b56cd00>
 
-bayes_opt_boptimizer
-^^^^^^^^^^^^^^^^^^^^
-- int hp_period = -1 [default value, from src/limbo/bayes_opt/boptimizer.hpp]<map object at 0xffff5f8cb580>
+mean_constant
+^^^^^^^^^^^^^
+- double constant = 0 [defined in exp/myExp/main.cpp]<map object at 0xffff7b67dd20>
 
-bayes_opt_bobase
-^^^^^^^^^^^^^^^^
-- int stats_enabled = true [defined in exp/myExp/main.cpp]<map object at 0xffff5f8c8a60>
-- bool bounded = true [defined in exp/myExp/main.cpp]<map object at 0xffff5f8c8580>
-
-kernel
-^^^^^^
-- double noise = 1e-10 [defined in exp/myExp/main.cpp]<map object at 0xffff5f8c8430>
-- bool optimize_noise = false [default value, from src/limbo/kernel/kernel.hpp]<map object at 0xffff5f8d7250>
+opt_rprop
+^^^^^^^^^
+- int iterations = 300 [default value, from src/limbo/opt/rprop.hpp]<map object at 0xffff7b56cfd0>
+- double eps_stop = 0.0 [default value, from src/limbo/opt/rprop.hpp]<map object at 0xffff7b56d0c0>
 
 stop_maxiterations
 ^^^^^^^^^^^^^^^^^^
-- int iterations = 50 [defined in exp/myExp/main.cpp]<map object at 0xffff5f8c8c40>
+- int iterations = 150 [defined in exp/myExp/main.cpp]<map object at 0xffff7b67cca0>
+
+bayes_opt_boptimizer
+^^^^^^^^^^^^^^^^^^^^
+- int hp_period = -1 [default value, from src/limbo/bayes_opt/boptimizer.hpp]<map object at 0xffff7b69b670>
+
+bayes_opt_bobase
+^^^^^^^^^^^^^^^^
+- int stats_enabled = true [defined in exp/myExp/main.cpp]<map object at 0xffff7b698bb0>
+- bool bounded = true [defined in exp/myExp/main.cpp]<map object at 0xffff7b69b6a0>
+
+kernel
+^^^^^^
+- double noise = 0.01 [defined in exp/myExp/main.cpp]<map object at 0xffff7b67e4d0>
+- bool optimize_noise = true [defined in exp/myExp/main.cpp]<map object at 0xffff7b67ff40>
 
 acqui_ucb
 ^^^^^^^^^
-- double alpha = 1.96 [defined in exp/myExp/main.cpp]<map object at 0xffff5f8c9840>
+- double alpha = 0.5 [defined in exp/myExp/main.cpp]<map object at 0xffff7b67faf0>
 
-kernel_maternfivehalves
-^^^^^^^^^^^^^^^^^^^^^^^
-- double sigma_sq = 1 [defined in exp/myExp/main.cpp]<map object at 0xffff5f8c8700>
-- double l = 1 [defined in exp/myExp/main.cpp]<map object at 0xffff5f8c8e80>
+DummyEval
+^^^^^^^^^
+
+kernel_squared_exp_ard
+^^^^^^^^^^^^^^^^^^^^^^
+- double sigma_sq = 1 [defined in exp/myExp/main.cpp]<map object at 0xffff7b67fb20>
+
+=========================================
+FILE: exp/myExp/main2.cpp
+
+opt_nloptnograd
+^^^^^^^^^^^^^^^
+- int iterations = 500 [defined in exp/myExp/main2.cpp]<map object at 0xffff7b698730>
+- double fun_tolerance = -1 [default value, from src/limbo/opt/nlopt_no_grad.hpp]<map object at 0xffff7b56cc10>
+- double xrel_tolerance = -1 [default value, from src/limbo/opt/nlopt_no_grad.hpp]<map object at 0xffff7b56cd00>
+
+mean_constant
+^^^^^^^^^^^^^
+- double constant = 0 [defined in exp/myExp/main2.cpp]<map object at 0xffff7b67e470>
+
+opt_rprop
+^^^^^^^^^
+- int iterations = 300 [default value, from src/limbo/opt/rprop.hpp]<map object at 0xffff7b56cfd0>
+- double eps_stop = 0.0 [default value, from src/limbo/opt/rprop.hpp]<map object at 0xffff7b56d0c0>
+
+stop_maxiterations
+^^^^^^^^^^^^^^^^^^
+- int iterations = 150 [defined in exp/myExp/main2.cpp]<map object at 0xffff7b67fc70>
+
+bayes_opt_boptimizer
+^^^^^^^^^^^^^^^^^^^^
+- int hp_period = -1 [default value, from src/limbo/bayes_opt/boptimizer.hpp]<map object at 0xffff7b69b9a0>
+
+bayes_opt_bobase
+^^^^^^^^^^^^^^^^
+- int stats_enabled = true [defined in exp/myExp/main2.cpp]<map object at 0xffff7b698a30>
+- bool bounded = true [defined in exp/myExp/main2.cpp]<map object at 0xffff7b698d60>
+
+kernel
+^^^^^^
+- double noise = 0.01 [defined in exp/myExp/main2.cpp]<map object at 0xffff7b67f100>
+- bool optimize_noise = true [defined in exp/myExp/main2.cpp]<map object at 0xffff7b67fe80>
+
+acqui_ucb
+^^^^^^^^^
+- double alpha = 0.5 [defined in exp/myExp/main2.cpp]<map object at 0xffff7b67d4b0>
+
+DummyEval
+^^^^^^^^^
+
+kernel_squared_exp_ard
+^^^^^^^^^^^^^^^^^^^^^^
+- double sigma_sq = 1 [defined in exp/myExp/main2.cpp]<map object at 0xffff7b67d150>
 
 =========================================

@@ -3,6 +3,9 @@ from waflib.Configure import conf
 def options(opt):
      pass
 
+def configure(conf):
+    conf.env.CXXFLAGS += ['-Wall', '-Wextra', '-g', '-Og']  # Enable debugging
+    conf.env.LINKFLAGS += ['-g']  # Ensure debugging symbols in the binary
 
 def build(bld):
     bld(features='cxx cxxprogram',
@@ -10,4 +13,6 @@ def build(bld):
         includes='. ../../src',
         target='myExp',
         uselib='BOOST EIGEN TBB LIBCMAES NLOPT',
-        use='limbo')
+        use='limbo',
+        #defines=['USE_DUMMY'],
+        )
