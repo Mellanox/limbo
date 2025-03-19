@@ -265,13 +265,11 @@ struct Params {
   };
 
   struct bayes_opt_boptimizer : public defaults::bayes_opt_boptimizer {
-    BO_PARAM(int, hp_period, 1); // -1 means no hyperparameter optimization
+    BO_PARAM(int, hp_period, 1); //Currently set to 1 (hp opt every iteration). In future a custom 'skip' logic should be implemented
   };
 
-  struct opt_nloptnograd : public defaults::opt_nloptnograd { // TODO: BO seems to get stuck at local point very quickly, need to swap acqusition optimizer?
+  struct opt_nloptnograd : public defaults::opt_nloptnograd {
     BO_PARAM(int, iterations, 500);
-    BO_PARAM(double, learning_rate, 0.01);
-    BO_PARAM(double, tolerance, 1e-6);
   };
 
   struct kernel : public defaults::kernel {
@@ -285,7 +283,7 @@ struct Params {
   };
 
   struct init_randomsampling {
-    BO_PARAM(int, samples, 10); // Matching Python's num_sobol_trials
+    BO_PARAM(int, samples, 50);
   };
 
   struct stop_maxiterations {
@@ -296,9 +294,13 @@ struct Params {
     BO_PARAM(double, alpha, 0.5);
   };
 
-  struct opt_rprop : public defaults::opt_rprop { //TODO: hyperparameters can converge on extremely high lengthscales - need to investigate
+  struct opt_rprop : public defaults::opt_rprop { 
   };
 
+  struct opt_parallelrepeater : public defaults::opt_parallelrepeater {
+    BO_PARAM(int, repeats, 10);
+    BO_PARAM(double, epsilon, 1);
+  };
   struct mean_constant : public defaults::mean_constant {
     BO_PARAM(double, constant, 0);
   };
@@ -346,13 +348,12 @@ struct DummyEval {
     // the function to be optimized
     Eigen::VectorXd operator()(const Eigen::VectorXd& x) const
     {
-        //Optimal point is at (0.5, 0 , 0.3) (since optimization is bounded to [0,1]^3)
         Eigen::VectorXd vec(3);
-        vec << 0.5, -0.5 , 0.3;//, 0,0;
-        double y = - (x-vec).norm() * 0.1;
+        vec << 0.5, 0.5 , 0.5;
+        double y = - (x-vec).norm();
         // Add Gaussian noise to y
         double noise_mean = 0.0;
-        double noise_stddev = 0.0;
+        double noise_stddev = 0.1;
         std::random_device rd;
         std::mt19937 gen(rd());
         std::normal_distribution<> d(noise_mean, noise_stddev);
@@ -372,13 +373,17 @@ int main() {
 
     using kernel_t = kernel::SquaredExpARD<Params>;
     //using mean_t = mean::Data<Params>;
-    //using mean_t = mean:FunctionARD<Params, mean::Constant>;
+    //using gp_opt_t = model::gp::KernelLFOpt<Params>;
     using mean_t = mean::Constant<Params>;
     using gp_opt_t = model::gp::KernelMeanLFOpt<Params>;
+    
     using gp_t = model::GP<Params, kernel_t, mean_t, gp_opt_t>;
-    using Acqui_t = acqui::UCB<Params, gp_t>;
-    // Initialize and run optimizer
-    bayes_opt::BOptimizer<Params,modelfun<gp_t>,acquifun<Acqui_t>> optimizer;
+    using acqui_t = acqui::UCB<Params, gp_t>;
+    using acqui_opt_t = opt::NLOptNoGrad<Params>;
+    using stat_t = boost::fusion::vector<stat::ConsoleSummary<Params>, stat::Samples<Params>, stat::Observations<Params>, stat::GPAcquisitions<Params>, stat::BestAggregatedObservations<Params>, stat::GPKernelHParams<Params>,stat::GPPredictionDifferences<Params>>;
+    using init_t = init::RandomSampling<Params>;
+                    
+    bayes_opt::BOptimizer<Params,modelfun<gp_t>,acquifun<acqui_t>, acquiopt<acqui_opt_t>, initfun<init_t>, statsfun<stat_t>> optimizer;
 
     #ifdef USE_DUMMY
       std::cout << "Optimizing Dummy function" << std::endl;
@@ -414,10 +419,6 @@ int main() {
       std::cout << "\nBest IOPS: " << optimizer.best_observation()(0)
         << std::endl;
     #endif
-
-    std::string save_directory = "gp_model";
-    gp_t gp_model = optimizer.model();
-    gp_model.save<serialize::TextArchive>(serialize::TextArchive(save_directory));
 
   } catch (const std::exception &e) {
     std::cerr << "Error during optimization: " << e.what() << std::endl;
