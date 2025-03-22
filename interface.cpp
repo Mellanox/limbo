@@ -20,53 +20,66 @@
 using namespace limbo;
 using namespace limbo::tools;
 
-// Custom aggregator that only uses last N observations
-template <typename Params>
-struct LastNObservations {
-    static constexpr int N = 40;  // Window size
-    
-    template <typename F>
-    Eigen::VectorXd operator()(const F& f, const std::vector<Eigen::VectorXd>& prev_x,
-                              const std::vector<Eigen::VectorXd>& prev_y) const {
-        // If we have fewer than N observations, use all of them
-        if (prev_x.size() <= N) {
-            return f(prev_x, prev_y);
-        }
-        
-        // Otherwise, only use the last N observations
-        std::vector<Eigen::VectorXd> recent_x(prev_x.end() - N, prev_x.end());
-        std::vector<Eigen::VectorXd> recent_y(prev_y.end() - N, prev_y.end());
-        return f(recent_x, recent_y);
-    }
-};
+
+
 
 // Class to interface with SNAP system
 class SnapRPC {
 public:
-  SnapRPC() {}
+  SnapRPC() : last_completions(0), last_timestamp(0) {}
   
   // Set parameters in the SNAP system
   bool set_params(const std::map<std::string, std::string>& params) {
+    auto start = std::chrono::high_resolution_clock::now();
     int poll_size = std::stoi(params.at("poll_size"));
     double poll_ratio = std::stod(params.at("poll_ratio"));
     int max_inflights = std::stoi(params.at("max_inflights"));
     int max_iog_batch = std::stoi(params.at("max_iog_batch"));
     int max_new_ios = std::stoi(params.at("max_new_ios"));
     
-    return snap_optimizer_set_system_params(poll_size, poll_ratio, 
+    bool result = snap_optimizer_set_system_params(poll_size, poll_ratio, 
                                           max_inflights, max_iog_batch, 
                                           max_new_ios) == 0;
+    
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    std::cout << "set_params took: " << duration.count() << " microseconds\n";
+    return result;
   }
   
   // Get performance metric from SNAP system
   double get_reward() {
-    uint64_t completions1 = snap_optimizer_get_performance_metric();
-    std::this_thread::sleep_for(std::chrono::milliseconds(100)); // Sample duration
-    uint64_t completions2 = snap_optimizer_get_performance_metric();
+    auto start = std::chrono::high_resolution_clock::now();
+    uint64_t completions = snap_optimizer_get_performance_metric();
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    std::cout << "get_performance_metric took: " << duration.count() << " microseconds\n";
+
+    // Calculate IOPS based on difference from last measurement
+    if (last_timestamp == 0) {
+      last_completions = completions;
+      last_timestamp = std::chrono::duration_cast<std::chrono::microseconds>(
+          std::chrono::system_clock::now().time_since_epoch()).count();
+      return 0.0;  // First measurement, no IOPS yet
+    }
+
+    auto current_timestamp = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count();
+    double time_diff = (current_timestamp - last_timestamp) / 1000000.0;  // Convert microseconds to seconds
+    double completions_diff = completions - last_completions;
     
-    // Calculate IOPS (completions per second)
-    return (completions2 - completions1) * 10.0; // Multiply by 10 since we waited 100ms
+    last_completions = completions;
+    last_timestamp = current_timestamp;
+
+    double iops = completions_diff / time_diff;
+    std::cout << "IOPS calculation: " << completions_diff << " completions over " 
+              << time_diff << " seconds = " << iops << " IOPS\n";
+    return iops;
   }
+
+private:
+  uint64_t last_completions;
+  uint64_t last_timestamp;
 };
 
 // Structure to hold SNAP parameters
@@ -133,7 +146,7 @@ struct Params {
   };
 
   struct opt_nloptnograd : public defaults::opt_nloptnograd {
-    BO_PARAM(int, iterations, 500);
+    BO_PARAM(int, iterations, 50);
   };
 
   struct kernel : public defaults::kernel {
@@ -147,7 +160,7 @@ struct Params {
   };
 
   struct init_randomsampling {
-    BO_PARAM(int, samples, 50);
+    BO_PARAM(int, samples, 20);
   };
 
   struct stop_maxiterations {
@@ -167,6 +180,40 @@ struct Params {
   struct mean_constant : public defaults::mean_constant {
     BO_PARAM(double, constant, 0);
   };
+};
+
+// Custom GP model that uses only the last N observations
+template <typename Params, typename KernelFunction, typename MeanFunction, typename HyperParamsOptimizer>
+class WindowedGP : public model::GP<Params, KernelFunction, MeanFunction, HyperParamsOptimizer> {
+public:
+    using base_t = model::GP<Params, KernelFunction, MeanFunction, HyperParamsOptimizer>;
+    
+    WindowedGP()
+        : base_t() {}
+    WindowedGP(int dim_in, int dim_out)
+        : base_t(dim_in, dim_out) {}
+        
+    void compute(const std::vector<Eigen::VectorXd>& samples,
+                const std::vector<Eigen::VectorXd>& observations) {
+        static constexpr int N = 20;
+        
+        std::cout << "\n=== WindowedGP::compute Debug ===\n";
+        std::cout << "Total observations: " << samples.size() << "\n";
+        
+        // If we have fewer than N observations, use all of them
+        if (samples.size() <= N) {
+            std::cout << "Using all observations (less than window size)\n";
+            base_t::compute(samples, observations);
+            return;
+        }
+        
+        // Otherwise, use only the last N observations
+        std::cout << "Using only last " << N << " observations\n";
+        std::vector<Eigen::VectorXd> recent_samples(samples.end() - N, samples.end());
+        std::vector<Eigen::VectorXd> recent_observations(observations.end() - N, observations.end());
+        
+        base_t::compute(recent_samples, recent_observations);
+    }
 };
 
 // Evaluation function that uses SNAP RPC
@@ -230,11 +277,15 @@ using stat_t = boost::fusion::vector<
     stat::BestAggregatedObservations<Params>, stat::GPKernelHParams<Params>,
     stat::GPPredictionDifferences<Params>>;
 using init_t = init::RandomSampling<Params>;
-using aggregator_t = LastNObservations<Params>;
 
-static bayes_opt::BOptimizer<Params, modelfun<gp_t>, acquifun<acqui_t>,
+// Use the windowed GP model in the optimizer instantiation
+using windowed_gp_t = WindowedGP<Params, kernel_t, mean_t, gp_opt_t>;
+using windowed_acqui_t = acqui::UCB<Params, windowed_gp_t>;
+
+// Update g_optimizer definition to use the windowed model
+static bayes_opt::BOptimizer<Params, modelfun<windowed_gp_t>, acquifun<windowed_acqui_t>,
                              acquiopt<acqui_opt_t>, initfun<init_t>,
-                             statsfun<stat_t>, aggregator_t> *g_optimizer = nullptr;
+                             statsfun<stat_t>> *g_optimizer = nullptr;
 
 // Limbo optimizer initialization
 extern "C" int cpp_optimizer_init(void) {
@@ -243,7 +294,7 @@ extern "C" int cpp_optimizer_init(void) {
       return 0;
       
     g_rpc = new SnapRPC();
-    g_optimizer = new bayes_opt::BOptimizer<Params, modelfun<gp_t>, acquifun<acqui_t>, acquiopt<acqui_opt_t>, initfun<init_t>, statsfun<stat_t>, aggregator_t>();
+    g_optimizer = new bayes_opt::BOptimizer<Params, modelfun<windowed_gp_t>, acquifun<windowed_acqui_t>, acquiopt<acqui_opt_t>, initfun<init_t>, statsfun<stat_t>>();
     g_initialized = true;
     return 0;
   } catch (const std::exception& e) {
@@ -259,17 +310,38 @@ extern "C" int cpp_optimizer_iteration(void) {
   }
   
   try {
+    auto iteration_start = std::chrono::high_resolution_clock::now();
+    
     Eval eval(*g_rpc);
     #ifdef USE_DUMMY
         std::cout << "Optimizing Dummy function" << std::endl;
         optimizer.optimize(DummyEval());
     #else
         std::cout << "Optimizing SNAP" << std::endl;
-        g_optimizer->optimize(eval, FirstElem(), false);  // false means don't reset state
+        // The aggregator is already specified in the template parameters of g_optimizer
+        g_optimizer->optimize(eval, FirstElem(), false);
     #endif
+    
+    auto optimization_end = std::chrono::high_resolution_clock::now();
+    auto optimization_duration = std::chrono::duration_cast<std::chrono::microseconds>(
+        optimization_end - iteration_start);
+    std::cout << "Optimization took: " << optimization_duration.count() / 1000.0 << " milliseconds\n";
+
     g_best_params = g_optimizer->best_sample();  
     SnapParams params = SnapParams::from_optimization_space(g_best_params);
+    
+    auto params_start = std::chrono::high_resolution_clock::now();
     g_rpc->set_params(params.to_rpc_params());
+    auto params_end = std::chrono::high_resolution_clock::now();
+    auto params_duration = std::chrono::duration_cast<std::chrono::microseconds>(
+        params_end - params_start);
+    std::cout << "Setting parameters took: " << params_duration.count() << " microseconds\n";
+
+    auto iteration_end = std::chrono::high_resolution_clock::now();
+    auto total_duration = std::chrono::duration_cast<std::chrono::microseconds>(
+        iteration_end - iteration_start);
+    std::cout << "Total iteration time: " << total_duration.count() / 1000.0 << " milliseconds\n";
+    
     return 0;
   } catch (const std::exception& e) {
     std::cerr << "Error in limbo optimizer iteration: " << e.what() << "\n";
