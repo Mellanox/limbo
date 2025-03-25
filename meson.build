@@ -12,7 +12,7 @@ add_project_arguments('-DUSE_NLOPT', '-DUSE_LIBCMAES', language: 'cpp')
 
 # Find required dependencies
 boost_dep = dependency('boost', required: true, modules: ['filesystem'])
-tbb_dep = dependency('tbb', required: true)
+#tbb_dep = dependency('tbb', required: true)
 eigen_dep = dependency('eigen3', required: true, include_type: 'system')
 spdlog_dep = dependency('spdlog', required: true)
 nlopt_dep = dependency('nlopt', required: true)
@@ -21,7 +21,7 @@ openmp_dep = dependency('openmp', required: true)
 
 dependencies = [
     boost_dep,
-    tbb_dep,
+    #tbb_dep,
     eigen_dep,
     spdlog_dep,
     nlopt_dep,
@@ -46,7 +46,7 @@ limbo_lib = library('limbo',
     include_directories: include_directories('src'),
     cpp_args: args + [
         '-DUSE_NLOPT',  # Always define USE_NLOPT since we're using it
-        '-DUSE_LIBCMAES'  # Always define USE_LIBCMAES since we're using it
+        '-DUSE_LIBCMAES',  # Always define USE_LIBCMAES since we're using it
     ],
     dependencies: dependencies
 )

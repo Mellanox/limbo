@@ -20,6 +20,26 @@
 using namespace limbo;
 using namespace limbo::tools;
 
+// Custom aggregator that only uses last N observations
+template <typename Params>
+struct LastNObservations {
+    static constexpr int N = 40;  // Window size
+    
+    template <typename F>
+    Eigen::VectorXd operator()(const F& f, const std::vector<Eigen::VectorXd>& prev_x,
+                              const std::vector<Eigen::VectorXd>& prev_y) const {
+        // If we have fewer than N observations, use all of them
+        if (prev_x.size() <= N) {
+            return f(prev_x, prev_y);
+        }
+        
+        // Otherwise, only use the last N observations
+        std::vector<Eigen::VectorXd> recent_x(prev_x.end() - N, prev_x.end());
+        std::vector<Eigen::VectorXd> recent_y(prev_y.end() - N, prev_y.end());
+        return f(recent_x, recent_y);
+    }
+};
+
 // Class to interface with SNAP system
 class SnapRPC {
 public:
@@ -40,8 +60,12 @@ public:
   
   // Get performance metric from SNAP system
   double get_reward() {
-    uint64_t metric = snap_optimizer_get_performance_metric();
-    return static_cast<double>(metric);
+    uint64_t completions1 = snap_optimizer_get_performance_metric();
+    std::this_thread::sleep_for(std::chrono::milliseconds(100)); // Sample duration
+    uint64_t completions2 = snap_optimizer_get_performance_metric();
+    
+    // Calculate IOPS (completions per second)
+    return (completions2 - completions1) * 10.0; // Multiply by 10 since we waited 100ms
   }
 };
 
@@ -75,14 +99,14 @@ struct SnapParams {
     SnapParams params;
 
     // poll_size: 1-256 (power of 2)
-    params.poll_size = from_power2_space(x(0), 0, 8); // 2^0 to 2^8 = 1 to 256
+    params.poll_size = from_power2_space(x[0], 0, 8); // 2^0 to 2^8 = 1 to 256
 
     // poll_ratio: 0-1 (linear scale)
-    params.poll_ratio = x(1);
+    params.poll_ratio = x[1];
 
     // max_inflights: 1-65535 (power of 2)
     params.max_inflights =
-        from_power2_space(x(2), 0, 16); // 2^0 to 2^16 = 1 to 65536
+        from_power2_space(x[2], 0, 16); // 2^0 to 2^16 = 1 to 65536
 
     // max_iog_batch: 1-4096 (power of 2)
     params.max_iog_batch =
@@ -98,7 +122,7 @@ struct SnapParams {
 
 struct Params {
   struct bayes_opt_bobase : public defaults::bayes_opt_bobase {
-    BO_PARAM(int, stats_enabled, true);
+    BO_PARAM(int, stats_enabled, false);
     BO_PARAM(bool, bounded, true);
   };
 
@@ -127,7 +151,7 @@ struct Params {
   };
 
   struct stop_maxiterations {
-    BO_PARAM(int, iterations, 1);
+    BO_PARAM(int, iterations, 1);  // Keep at 1 iteration per optimize() call
   };
 
   struct acqui_ucb : public defaults::acqui_ucb {
@@ -160,12 +184,7 @@ struct Eval {
     SnapParams params = SnapParams::from_optimization_space(x);
 
     double score = rpc.get_reward();
-    std::cout << "Final score (median): " << score << std::endl;
-
-    // Ensure we're not returning 0 unless that's the actual score
-    if (score == 0) {
-      std::cerr << "Warning: Performance metric is 0. This might indicate an issue with the measurement." << std::endl;
-    }
+    std::cout << "Final score (median): " << score << "\n";
 
     return Eigen::VectorXd::Constant(1, score);
   }
@@ -211,9 +230,12 @@ using stat_t = boost::fusion::vector<
     stat::BestAggregatedObservations<Params>, stat::GPKernelHParams<Params>,
     stat::GPPredictionDifferences<Params>>;
 using init_t = init::RandomSampling<Params>;
+using aggregator_t = LastNObservations<Params>;
+
 static bayes_opt::BOptimizer<Params, modelfun<gp_t>, acquifun<acqui_t>,
                              acquiopt<acqui_opt_t>, initfun<init_t>,
-                             statsfun<stat_t>> *g_optimizer = nullptr;
+                             statsfun<stat_t>, aggregator_t> *g_optimizer = nullptr;
+
 // Limbo optimizer initialization
 extern "C" int cpp_optimizer_init(void) {
   try {
@@ -221,11 +243,11 @@ extern "C" int cpp_optimizer_init(void) {
       return 0;
       
     g_rpc = new SnapRPC();
-    g_optimizer = new bayes_opt::BOptimizer<Params, modelfun<gp_t>, acquifun<acqui_t>, acquiopt<acqui_opt_t>, initfun<init_t>, statsfun<stat_t>>();
+    g_optimizer = new bayes_opt::BOptimizer<Params, modelfun<gp_t>, acquifun<acqui_t>, acquiopt<acqui_opt_t>, initfun<init_t>, statsfun<stat_t>, aggregator_t>();
     g_initialized = true;
     return 0;
   } catch (const std::exception& e) {
-    std::cerr << "Error initializing limbo optimizer: " << e.what() << std::endl;
+    std::cerr << "Error initializing limbo optimizer: " << e.what() << "\n";
     return -1;
   }
 }
@@ -250,7 +272,7 @@ extern "C" int cpp_optimizer_iteration(void) {
     g_rpc->set_params(params.to_rpc_params());
     return 0;
   } catch (const std::exception& e) {
-    std::cerr << "Error in limbo optimizer iteration: " << e.what() << std::endl;
+    std::cerr << "Error in limbo optimizer iteration: " << e.what() << "\n";
     return -1;
   }
 }
@@ -271,7 +293,7 @@ extern "C" int cpp_optimizer_cleanup(void) {
     g_initialized = false;
     return 0;
   } catch (const std::exception& e) {
-    std::cerr << "Error cleaning up limbo optimizer: " << e.what() << std::endl;
+    std::cerr << "Error cleaning up limbo optimizer: " << e.what() << "\n";
     return -1;
   }
 }
