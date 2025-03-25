@@ -96,42 +96,52 @@ struct SnapParams {
   }
 };
 
-// Parameters matching Python's SNAP environment
 struct Params {
-  struct bayes_opt_bobase : public limbo::defaults::bayes_opt_bobase {
+  struct bayes_opt_bobase : public defaults::bayes_opt_bobase {
     BO_PARAM(int, stats_enabled, true);
     BO_PARAM(bool, bounded, true);
   };
 
-  struct bayes_opt_boptimizer : public limbo::defaults::bayes_opt_boptimizer {
-    BO_PARAM(int, hp_period, -1); // -1 means no hyperparameter optimization
+  struct bayes_opt_boptimizer : public defaults::bayes_opt_boptimizer {
+    BO_PARAM(int, hp_period,
+             1); // Currently set to 1 (hp opt every iteration). In future a
+                 // custom 'skip' logic should be implemented
   };
 
-  struct opt_nloptnograd : public limbo::defaults::opt_nloptnograd {
+  struct opt_nloptnograd : public defaults::opt_nloptnograd {
     BO_PARAM(int, iterations, 500);
-    BO_PARAM(double, learning_rate, 0.01);
-    BO_PARAM(double, tolerance, 1e-6);
   };
 
-  struct kernel : public limbo::defaults::kernel {
-    BO_PARAM(double, noise, 1e-10);
+  struct kernel : public defaults::kernel {
+    BO_PARAM(double, noise, 0.01);
+    BO_PARAM(bool, optimize_noise, true);
   };
 
-  struct kernel_maternfivehalves : public limbo::defaults::kernel_maternfivehalves {
+  struct kernel_squared_exp_ard : public defaults::kernel_squared_exp_ard {
     BO_PARAM(double, sigma_sq, 1);
-    BO_PARAM(double, l, 1);
+    BO_PARAM(int, k, 0);
   };
 
   struct init_randomsampling {
-    BO_PARAM(int, samples, 10); // Matching Python's num_sobol_trials
+    BO_PARAM(int, samples, 50);
   };
 
   struct stop_maxiterations {
-    BO_PARAM(int, iterations, 50);
+    BO_PARAM(int, iterations, 1);
   };
 
-  struct acqui_ucb : public limbo::defaults::acqui_ucb {
-    BO_PARAM(double, alpha, 1.96);
+  struct acqui_ucb : public defaults::acqui_ucb {
+    BO_PARAM(double, alpha, 0.5);
+  };
+
+  struct opt_rprop : public defaults::opt_rprop {};
+
+  struct opt_parallelrepeater : public defaults::opt_parallelrepeater {
+    BO_PARAM(int, repeats, 10);
+    BO_PARAM(double, epsilon, 1);
+  };
+  struct mean_constant : public defaults::mean_constant {
+    BO_PARAM(double, constant, 0);
   };
 };
 
@@ -149,31 +159,61 @@ struct Eval {
     // Convert optimization parameters to SNAP parameters
     SnapParams params = SnapParams::from_optimization_space(x);
 
-    // Take multiple samples
-    std::vector<double> scores;
-    for (int i = 0; i < num_samples; ++i) {
-      // Set parameters
-      rpc.set_params(params.to_rpc_params());
+    double score = rpc.get_reward();
+    std::cout << "Final score (median): " << score << std::endl;
 
-      // Get reward
-      double score = rpc.get_reward();
-      scores.push_back(score);
+    // Ensure we're not returning 0 unless that's the actual score
+    if (score == 0) {
+      std::cerr << "Warning: Performance metric is 0. This might indicate an issue with the measurement." << std::endl;
     }
 
-    // Calculate median
-    std::sort(scores.begin(), scores.end());
-    double final_score = scores[scores.size() / 2];
+    return Eigen::VectorXd::Constant(1, score);
+  }
+};
+struct DummyEval {
+  // number of input dimension (x.size())
+  BO_PARAM(size_t, dim_in, 3);
+  // number of dimensions of the result (res.size())
+  BO_PARAM(size_t, dim_out, 1);
 
-    return Eigen::VectorXd::Constant(1, final_score);
+  // the function to be optimized
+  Eigen::VectorXd operator()(const Eigen::VectorXd &x) const {
+    Eigen::VectorXd vec(3);
+    vec << 0.5, 0.5, 0.5;
+    double y = -(x - vec).norm();
+    // Add Gaussian noise to y
+    double noise_mean = 0.0;
+    double noise_stddev = 0.1;
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::normal_distribution<> d(noise_mean, noise_stddev);
+    y += d(gen);
+    // we return a 1-dimensional vector
+    return tools::make_vector(y);
   }
 };
 
 // Global variables
 static SnapRPC* g_rpc = nullptr;
-static bayes_opt::BOptimizer<Params>* g_optimizer = nullptr;
+
 static Eigen::VectorXd g_best_params;
 static bool g_initialized = false;
 
+using kernel_t = kernel::SquaredExpARD<Params>;
+using mean_t = mean::Constant<Params>;
+using gp_opt_t = model::gp::KernelMeanLFOpt<Params>;
+using gp_t = model::GP<Params, kernel_t, mean_t, gp_opt_t>;
+using acqui_t = acqui::UCB<Params, gp_t>;
+using acqui_opt_t = opt::NLOptNoGrad<Params>;
+using stat_t = boost::fusion::vector<
+    stat::ConsoleSummary<Params>, stat::Samples<Params>,
+    stat::Observations<Params>, stat::GPAcquisitions<Params>,
+    stat::BestAggregatedObservations<Params>, stat::GPKernelHParams<Params>,
+    stat::GPPredictionDifferences<Params>>;
+using init_t = init::RandomSampling<Params>;
+static bayes_opt::BOptimizer<Params, modelfun<gp_t>, acquifun<acqui_t>,
+                             acquiopt<acqui_opt_t>, initfun<init_t>,
+                             statsfun<stat_t>> *g_optimizer = nullptr;
 // Limbo optimizer initialization
 extern "C" int cpp_optimizer_init(void) {
   try {
@@ -181,7 +221,7 @@ extern "C" int cpp_optimizer_init(void) {
       return 0;
       
     g_rpc = new SnapRPC();
-    g_optimizer = new bayes_opt::BOptimizer<Params>();
+    g_optimizer = new bayes_opt::BOptimizer<Params, modelfun<gp_t>, acquifun<acqui_t>, acquiopt<acqui_opt_t>, initfun<init_t>, statsfun<stat_t>>();
     g_initialized = true;
     return 0;
   } catch (const std::exception& e) {
@@ -197,28 +237,17 @@ extern "C" int cpp_optimizer_iteration(void) {
   }
   
   try {
-    // Get initial reward
-    [[maybe_unused]] double initial_reward = g_rpc->get_reward();
-    
-    // Wait 50ms
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    
-    // Get reward again
-    [[maybe_unused]] double final_reward = g_rpc->get_reward();
-    
-    // Configure the evaluation function
     Eval eval(*g_rpc);
-    
-    // Perform optimization using Limbo
-    g_optimizer->optimize(eval);
-    
-    // Get the best parameters found by the optimizer
-    g_best_params = g_optimizer->best_sample();
-    
-    // Convert and set parameters
+    #ifdef USE_DUMMY
+        std::cout << "Optimizing Dummy function" << std::endl;
+        optimizer.optimize(DummyEval());
+    #else
+        std::cout << "Optimizing SNAP" << std::endl;
+        g_optimizer->optimize(eval, FirstElem(), false);  // false means don't reset state
+    #endif
+    g_best_params = g_optimizer->best_sample();  
     SnapParams params = SnapParams::from_optimization_space(g_best_params);
     g_rpc->set_params(params.to_rpc_params());
-    
     return 0;
   } catch (const std::exception& e) {
     std::cerr << "Error in limbo optimizer iteration: " << e.what() << std::endl;
