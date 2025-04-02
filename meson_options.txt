@@ -1,3 +1,4 @@
 option('use-nlopt', type: 'boolean', value: true, description: 'Link to NLOPT and enable its algorithms for optimization')
 option('use-cmaes', type: 'boolean', value: true, description: 'Link to libcmaes and enable its algorithms for optimization')
 option('use-tbb', type: 'boolean', value: true, description: 'Use Intel TBB for parallelization') 
+option('dummy', type: 'boolean', value: false, description: 'Enable dummy snap optimizer')

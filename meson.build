@@ -6,7 +6,6 @@ project('limbo', 'cpp',
     'buildtype=release'
   ]
 )
-
 # Define required preprocessor macros
 add_project_arguments('-DUSE_NLOPT', '-DUSE_LIBCMAES', language: 'cpp')
 
@@ -41,9 +40,20 @@ args = [
     '-Wno-error=unused-variable',  # Disable treating unused variables as errors
     '-Wno-error=unused-but-set-variable',  # Disable treating unused but set variables as errors
 ]
+
+# Define include directories
+limbo_inc = include_directories('src')
+snap_inc = include_directories('.') # Include current dir for snap_optimizer/ header
+
+all_includes = [limbo_inc]
+if get_option('dummy')
+  all_includes += [snap_inc]
+endif
+
 # Create interface library target
 limbo_lib = library('limbo',
-    include_directories: include_directories('src'),
+    sources: ['interface.cpp'],
+    include_directories: all_includes,
     cpp_args: args + [
         '-DUSE_NLOPT',  # Always define USE_NLOPT since we're using it
         '-DUSE_LIBCMAES',  # Always define USE_LIBCMAES since we're using it
@@ -53,13 +63,14 @@ limbo_lib = library('limbo',
 
 # Install the limbo headers
 install_subdir('src/limbo', install_dir: 'include')
-
+if get_option('dummy')
+    install_subdir('snap_optimizer', install_dir: 'include/snap_optimizer')
+endif
 # Create dependency object that includes both library and interface files
 limbo_dep = declare_dependency(
     link_with: limbo_lib,
-    include_directories: include_directories('src'),
+    include_directories: all_includes,
     sources: [
-        'interface.cpp',
         'src/limbo/limbo.hpp'  # Add the main limbo header that defines the namespace
     ],
     dependencies: dependencies

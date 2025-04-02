@@ -1,18 +1,29 @@
 #include "interface.hpp"
-#include <snap_optimizer_interface.h>
-#include <Eigen/Core>
+
+// Standard C++ Headers
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <future>
 #include <iostream>
 #include <map>
 #include <string>
+#include <thread>
+#include <vector>
+
+// C Interface Header
+#include "snap_optimizer/snap_optimizer_interface.h"
+
+// System Headers (Potentially problematic)
 #include <sys/socket.h>
 #include <sys/un.h>
-#include <thread>
 #include <unistd.h>
-#include <vector>
+
+// Eigen Header
+#include <Eigen/Core>
+
+// Limbo Headers
 #include "limbo/limbo.hpp"
 #include "limbo/tools/macros.hpp"
 #include "limbo/tools/random_generator.hpp"
@@ -20,60 +31,65 @@
 using namespace limbo;
 using namespace limbo::tools;
 
-
-
-
 // Class to interface with SNAP system
 class SnapRPC {
 public:
   SnapRPC() : last_completions(0), last_timestamp(0) {}
-  
+
   // Set parameters in the SNAP system
-  bool set_params(const std::map<std::string, std::string>& params) {
+  bool set_params(const std::map<std::string, std::string> &params) {
     auto start = std::chrono::high_resolution_clock::now();
     int poll_size = std::stoi(params.at("poll_size"));
     double poll_ratio = std::stod(params.at("poll_ratio"));
     int max_inflights = std::stoi(params.at("max_inflights"));
     int max_iog_batch = std::stoi(params.at("max_iog_batch"));
     int max_new_ios = std::stoi(params.at("max_new_ios"));
-    
-    bool result = snap_optimizer_set_system_params(poll_size, poll_ratio, 
-                                          max_inflights, max_iog_batch, 
-                                          max_new_ios) == 0;
-    
+
+    bool result =
+        snap_optimizer_set_system_params(poll_size, poll_ratio, max_inflights,
+                                         max_iog_batch, max_new_ios) == 0;
+
     auto end = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    auto duration =
+        std::chrono::duration_cast<std::chrono::microseconds>(end - start);
     std::cout << "set_params took: " << duration.count() << " microseconds\n";
     return result;
   }
-  
+
   // Get performance metric from SNAP system
   double get_reward() {
     auto start = std::chrono::high_resolution_clock::now();
     uint64_t completions = snap_optimizer_get_performance_metric();
     auto end = std::chrono::high_resolution_clock::now();
-    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-    std::cout << "get_performance_metric took: " << duration.count() << " microseconds\n";
+    auto duration =
+        std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+    std::cout << "get_performance_metric took: " << duration.count()
+              << " microseconds\n";
 
     // Calculate IOPS based on difference from last measurement
     if (last_timestamp == 0) {
       last_completions = completions;
       last_timestamp = std::chrono::duration_cast<std::chrono::microseconds>(
-          std::chrono::system_clock::now().time_since_epoch()).count();
-      return 0.0;  // First measurement, no IOPS yet
+                           std::chrono::system_clock::now().time_since_epoch())
+                           .count();
+      return 0.0; // First measurement, no IOPS yet
     }
 
-    auto current_timestamp = std::chrono::duration_cast<std::chrono::microseconds>(
-        std::chrono::system_clock::now().time_since_epoch()).count();
-    double time_diff = (current_timestamp - last_timestamp) / 1000000.0;  // Convert microseconds to seconds
+    auto current_timestamp =
+        std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::system_clock::now().time_since_epoch())
+            .count();
+    double time_diff = (current_timestamp - last_timestamp) /
+                       1000000.0; // Convert microseconds to seconds
     double completions_diff = completions - last_completions;
-    
+
     last_completions = completions;
     last_timestamp = current_timestamp;
 
     double iops = completions_diff / time_diff;
-    std::cout << "IOPS calculation: " << completions_diff << " completions over " 
-              << time_diff << " seconds = " << iops << " IOPS\n";
+    std::cout << "IOPS calculation: " << completions_diff
+              << " completions over " << time_diff << " seconds = " << iops
+              << " IOPS\n";
     return iops;
   }
 
@@ -112,14 +128,14 @@ struct SnapParams {
     SnapParams params;
 
     // poll_size: 1-256 (power of 2)
-    params.poll_size = from_power2_space(x[0], 0, 8); // 2^0 to 2^8 = 1 to 256
+    params.poll_size = from_power2_space(x(0), 0, 8); // 2^0 to 2^8 = 1 to 256
 
     // poll_ratio: 0-1 (linear scale)
-    params.poll_ratio = x[1];
+    params.poll_ratio = x(1);
 
     // max_inflights: 1-65535 (power of 2)
     params.max_inflights =
-        from_power2_space(x[2], 0, 16); // 2^0 to 2^16 = 1 to 65536
+        from_power2_space(x(2), 0, 16); // 2^0 to 2^16 = 1 to 65536
 
     // max_iog_batch: 1-4096 (power of 2)
     params.max_iog_batch =
@@ -146,7 +162,7 @@ struct Params {
   };
 
   struct opt_nloptnograd : public defaults::opt_nloptnograd {
-    BO_PARAM(int, iterations, 50);
+    BO_PARAM(int, iterations, 500);
   };
 
   struct kernel : public defaults::kernel {
@@ -164,7 +180,7 @@ struct Params {
   };
 
   struct stop_maxiterations {
-    BO_PARAM(int, iterations, 1);  // Keep at 1 iteration per optimize() call
+    BO_PARAM(int, iterations, 50); // Keep at 1 iteration per optimize() call
   };
 
   struct acqui_ucb : public defaults::acqui_ucb {
@@ -181,50 +197,19 @@ struct Params {
     BO_PARAM(double, constant, 0);
   };
 };
-
-// Custom GP model that uses only the last N observations
-template <typename Params, typename KernelFunction, typename MeanFunction, typename HyperParamsOptimizer>
-class WindowedGP : public model::GP<Params, KernelFunction, MeanFunction, HyperParamsOptimizer> {
-public:
-    using base_t = model::GP<Params, KernelFunction, MeanFunction, HyperParamsOptimizer>;
-    
-    WindowedGP()
-        : base_t() {}
-    WindowedGP(int dim_in, int dim_out)
-        : base_t(dim_in, dim_out) {}
-        
-    void compute(const std::vector<Eigen::VectorXd>& samples,
-                const std::vector<Eigen::VectorXd>& observations) {
-        static constexpr int N = 20;
-        
-        std::cout << "\n=== WindowedGP::compute Debug ===\n";
-        std::cout << "Total observations: " << samples.size() << "\n";
-        
-        // If we have fewer than N observations, use all of them
-        if (samples.size() <= N) {
-            std::cout << "Using all observations (less than window size)\n";
-            base_t::compute(samples, observations);
-            return;
-        }
-        
-        // Otherwise, use only the last N observations
-        std::cout << "Using only last " << N << " observations\n";
-        std::vector<Eigen::VectorXd> recent_samples(samples.end() - N, samples.end());
-        std::vector<Eigen::VectorXd> recent_observations(observations.end() - N, observations.end());
-        
-        base_t::compute(recent_samples, recent_observations);
-    }
-};
-
 // Evaluation function that uses SNAP RPC
 struct Eval {
+  BO_PARAM(size_t, dim_in, 5);  // 5 SNAP parameters
+  BO_PARAM(size_t, dim_out, 1); // Single objective (IOPS)
+};
+struct RPCEval {
   BO_PARAM(size_t, dim_in, 5);  // 5 SNAP parameters
   BO_PARAM(size_t, dim_out, 1); // Single objective (IOPS)
 
   SnapRPC &rpc;
   int num_samples = 1;
 
-  Eval(SnapRPC &rpc_client) : rpc(rpc_client) {}
+  RPCEval(SnapRPC &rpc_client) : rpc(rpc_client) {}
 
   Eigen::VectorXd operator()(const Eigen::VectorXd &x) const {
     // Convert optimization parameters to SNAP parameters
@@ -259,11 +244,69 @@ struct DummyEval {
   }
 };
 
+// New evaluation function that decrements a counter
+struct DecrementingEval {
+  BO_PARAM(size_t, dim_in, 5);  // Same input dimension as Eval
+  BO_PARAM(size_t, dim_out, 1); // Same output dimension as Eval
+
+private:
+  // Static counter to maintain state across calls if multiple instances are
+  // created
+  constexpr static double MAX_VALUE = 100000.0;
+  constexpr static int REDUCTION_RATE = 100;
+  static int iteration;
+
+public:
+  // The function to be optimized
+  Eigen::VectorXd operator()(const Eigen::VectorXd &x) const {
+    // DEBUG: Print the input x received from the optimizer
+    std::cout << "  DEBUG (DecrementingEval): Received x = " << x.transpose()
+              << std::endl;
+
+    double calculated_value =
+        MAX_VALUE -
+        (++const_cast<DecrementingEval *>(this)->iteration) * REDUCTION_RATE;
+    std::cout << "  DEBUG (DecrementingEval): Returning value = "
+              << calculated_value << std::endl;
+    return Eigen::VectorXd::Constant(1, calculated_value);
+  }
+};
+
+// Initialize static member
+int DecrementingEval::iteration = 0;
+
+// New evaluation function that sums the input vector elements
+struct SumEval {
+  BO_PARAM(size_t, dim_in, 5);  // Expects 5 input dimensions
+  BO_PARAM(size_t, dim_out, 1); // Returns 1 output dimension
+
+public:
+  // The function calculates the sum of the input vector x
+  Eigen::VectorXd operator()(const Eigen::VectorXd &x) const {
+    // Ensure the input vector has the expected dimension
+    if (x.size() != dim_in()) {
+      throw std::invalid_argument("SumEval: Input vector dimension mismatch.");
+    }
+
+    // Calculate the sum of the elements
+    double sum = x.sum();
+
+    std::cout << "  DEBUG (SumEval): Received x = " << x.transpose()
+              << std::endl;
+    std::cout << "  DEBUG (SumEval): Returning sum = " << sum << std::endl;
+
+    // Return the sum as a 1-dimensional vector
+    return tools::make_vector(sum);
+  }
+};
+
 // Global variables
-static SnapRPC* g_rpc = nullptr;
+static SnapRPC *g_rpc = nullptr;
 
 static Eigen::VectorXd g_best_params;
 static bool g_initialized = false;
+static std::future<void>
+    g_opt_future; // Global future for the optimization task
 
 using kernel_t = kernel::SquaredExpARD<Params>;
 using mean_t = mean::Constant<Params>;
@@ -278,94 +321,292 @@ using stat_t = boost::fusion::vector<
     stat::GPPredictionDifferences<Params>>;
 using init_t = init::RandomSampling<Params>;
 
-// Use the windowed GP model in the optimizer instantiation
-using windowed_gp_t = WindowedGP<Params, kernel_t, mean_t, gp_opt_t>;
-using windowed_acqui_t = acqui::UCB<Params, windowed_gp_t>;
+// Define the new custom optimizer class inheriting from BoBase
+template <
+    class Params, class A1 = boost::parameter::void_,
+    class A2 = boost::parameter::void_, class A3 = boost::parameter::void_,
+    class A4 = boost::parameter::void_, class A5 = boost::parameter::void_,
+    class A6 = boost::parameter::void_>
+class StateBOptimizer
+    : public limbo::bayes_opt::BoBase<Params, A1, A2, A3, A4, A5, A6> {
+public:
+  // Remove the constructor from the abstract base class
+  /* StateBOptimizer()
+      : limbo::bayes_opt::BoBase<Params, A1, A2, A3, A4, A5, A6>() {
+    // This initialization was problematic here
+    // this->_init(sfun, afun, true);
+    // _model = model_t(StateFunction::dim_in(), StateFunction::dim_out());
+  }*/
+  virtual ~StateBOptimizer() = default; // Add virtual destructor
 
-// Update g_optimizer definition to use the windowed model
-static bayes_opt::BOptimizer<Params, modelfun<windowed_gp_t>, acquifun<windowed_acqui_t>,
+  // Pure virtual functions remain the same
+  virtual Eigen::VectorXd act(Eigen::VectorXd state) = 0;
+  virtual void update(Eigen::VectorXd sample, Eigen::VectorXd observation) = 0;
+  virtual Eigen::VectorXd best_arm_prediction(Eigen::VectorXd state) = 0;
+  virtual Eigen::VectorXd best_bo_prediction(Eigen::VectorXd state) = 0;
+
+protected:
+  virtual Eigen::VectorXd get_state() = 0;
+  virtual Eigen::VectorXd get_state_samples() = 0;
+};
+
+class SnapStateBOptimizer
+    : public StateBOptimizer<Params, modelfun<gp_t>, acquifun<acqui_t>,
                              acquiopt<acqui_opt_t>, initfun<init_t>,
-                             statsfun<stat_t>> *g_optimizer = nullptr;
+                             statsfun<stat_t>> {
+public:
+  // Constructor to initialize the base BoBase and the model
+  SnapStateBOptimizer()
+      : StateBOptimizer<Params, modelfun<gp_t>, acquifun<acqui_t>,
+                        acquiopt<acqui_opt_t>, initfun<init_t>,
+                        statsfun<stat_t>>() {
+    // Initialize model here, assuming Params defines model_t
+    // And DecrementingEval defines dimensions
+    // Note: _init is protected in BoBase, often called internally
+    // We might not need to call _init explicitly if base constructor handles it
+    this->_model =
+        model_t(DecrementingEval::dim_in(), DecrementingEval::dim_out());
+    // TODO: Verify if _init needs to be called or if base constructor is
+    // sufficient Example: If _init(sfun, afun, stats_enabled) is needed:
+    // this->_init(this->_eval, acquisition_function(),
+    // Params::stats_enabled()); where acquisition_function() returns an
+    // instance of acqui_t and this->_eval handles the evaluation logic based on
+    // get_state/act
+  }
 
+  // Override virtual functions
+  Eigen::VectorXd act(Eigen::VectorXd state) override {
+    std::cout << "DEBUG: SnapStateBOptimizer::act called with state: "
+              << state.transpose() << std::endl;
+    // Placeholder implementation
+    return Eigen::VectorXd::Zero(5); // Assuming action space dim is 5
+  }
+
+  void update(Eigen::VectorXd sample, Eigen::VectorXd observation) override {
+    std::cout << "DEBUG: SnapStateBOptimizer::update called with sample: "
+              << sample.transpose()
+              << " and observation: " << observation.transpose() << std::endl;
+  }
+
+  Eigen::VectorXd best_arm_prediction(Eigen::VectorXd state) override {
+    std::cout
+        << "DEBUG: SnapStateBOptimizer::best_arm_prediction called with state: "
+        << state.transpose() << std::endl;
+    // Placeholder implementation
+    return Eigen::VectorXd::Zero(5); // Assuming action space dim is 5
+  }
+
+  Eigen::VectorXd best_bo_prediction(Eigen::VectorXd state) override {
+    std::cout
+        << "DEBUG: SnapStateBOptimizer::best_bo_prediction called with state: "
+        << state.transpose() << std::endl;
+    // Placeholder - Implement actual BO prediction logic
+    // This might involve optimizing the acquisition function based on the
+    // current model For example: acqui_optimizer_t acqui_optimizer; auto
+    // acqui_func = [&](const Eigen::VectorXd& x, bool g) {
+    //     return acquisition_function()(x, g); // Assuming
+    //     acquisition_function() provides acqui_t instance
+    // };
+    // Eigen::VectorXd starting_point =
+    // tools::random_vector(StateFunction::dim_in(),
+    // Params::bayes_opt_bobase::bounded()); Eigen::VectorXd next_sample =
+    // acqui_optimizer(acqui_func, starting_point,
+    // Params::bayes_opt_bobase::bounded()); return next_sample;
+
+    return Eigen::VectorXd::Zero(5); // Placeholder return
+  }
+
+protected:
+  Eigen::VectorXd get_state() override {
+    struct snap_observations obs;
+    snap_optimizer_get_observations(&obs, 0);
+
+    Eigen::VectorXd state_vector(
+        DecrementingEval::dim_in()); // Use StateFunction for dim
+    state_vector(0) = static_cast<double>(obs.num_active_queues);
+    state_vector(1) = static_cast<double>(obs.num_queues);
+    state_vector(2) = static_cast<double>(obs.max_qdepth);
+    state_vector(3) = static_cast<double>(obs.avg_qdepth);
+
+    std::cout << "DEBUG: SnapStateBOptimizer::get_state returning: "
+              << state_vector.transpose() << std::endl;
+
+    return state_vector;
+  }
+
+  // Correct signature - no state argument
+  Eigen::VectorXd get_state_samples() override {
+    std::cout << "DEBUG: SnapStateBOptimizer::get_state_samples called"
+              << std::endl;
+    // Assumes get_samples() is available from a base class (like BoBase)
+    // Need to ensure BoBase actually provides get_samples()
+    // If BoBase stores samples in _samples, return that directly:
+    // Combine samples into a single Eigen matrix or vector if needed
+    if (this->_samples.empty()) {
+      return Eigen::VectorXd(); // Return empty vector if no samples
+    }
+    // This concatenates all samples horizontally. Adjust if different format
+    // needed.
+    Eigen::MatrixXd samples_mat(this->_samples[0].size(),
+                                this->_samples.size());
+    for (size_t i = 0; i < this->_samples.size(); ++i) {
+      samples_mat.col(i) = this->_samples[i];
+    }
+    // Returning samples might need clarification - returning the matrix for now
+    // Or maybe just the last sample? Returning the whole matrix as a flattened
+    // vector:
+    return samples_mat.reshaped(); // Flatten the matrix
+    // return this->_samples.back(); // Alternative: return only the last
+    // sample?
+  }
+  model_t _model;
+};
+static SnapStateBOptimizer *g_optimizer = nullptr;
+extern "C" int cpp_optimizer_init(void) { return 0; }
+extern "C" int cpp_optimizer_iteration(void) { return 0; }
+extern "C" int cpp_optimizer_cleanup(void) { return 0; }
 // Limbo optimizer initialization
-extern "C" int cpp_optimizer_init(void) {
+
+// Helper function to convert C array to Eigen Vector
+Eigen::VectorXd to_eigen_vector(const double *data, int size) {
+  return Eigen::Map<const Eigen::VectorXd>(data, size);
+}
+
+// Helper function to convert Eigen Vector to CVector (allocates memory)
+CVector to_cvector(const Eigen::VectorXd &vec) {
+  CVector c_vec;
+  c_vec.size = vec.size();
+  c_vec.data = new double[c_vec.size];
+  Eigen::Map<Eigen::VectorXd>(c_vec.data, c_vec.size) = vec;
+  return c_vec;
+}
+
+extern "C" {
+
+// Assuming SnapStateBOptimizer is derived from StateBOptimizer<Params>
+// If not, replace SnapStateBOptimizer with the actual class name.
+// Also assuming Params is defined appropriately in the scope.
+// If StateBOptimizer is the base class to be instantiated, adjust
+// accordingly.
+
+void *create_optimizer() {
   try {
-    if (g_initialized)
-      return 0;
-      
-    g_rpc = new SnapRPC();
-    g_optimizer = new bayes_opt::BOptimizer<Params, modelfun<windowed_gp_t>, acquifun<windowed_acqui_t>, acquiopt<acqui_opt_t>, initfun<init_t>, statsfun<stat_t>>();
-    g_initialized = true;
-    return 0;
-  } catch (const std::exception& e) {
-    std::cerr << "Error initializing limbo optimizer: " << e.what() << "\n";
-    return -1;
+    // IMPORTANT: Replace SnapStateBOptimizer if it's not the concrete class
+    // you intend to instantiate. Maybe you want StateBOptimizer directly?
+    // Or maybe the derived class needs specific constructor arguments?
+    auto *optimizer = new SnapStateBOptimizer();
+    // Perform any necessary initialization here if not done in constructor
+    return static_cast<void *>(optimizer);
+  } catch (const std::exception &e) {
+    std::cerr << "Error creating optimizer instance: " << e.what() << std::endl;
+    return nullptr;
+  } catch (...) {
+    std::cerr << "Unknown error creating optimizer instance." << std::endl;
+    return nullptr;
   }
 }
 
-// Limbo optimizer iteration
-extern "C" int cpp_optimizer_iteration(void) {
-  if (!g_rpc || !g_optimizer) {
-    return -1;
-  }
-  
+void destroy_optimizer(void *optimizer_handle) {
+  if (!optimizer_handle)
+    return;
+  // IMPORTANT: Match the type used in create_optimizer
+  auto *optimizer = static_cast<SnapStateBOptimizer *>(optimizer_handle);
   try {
-    auto iteration_start = std::chrono::high_resolution_clock::now();
-    
-    Eval eval(*g_rpc);
-    #ifdef USE_DUMMY
-        std::cout << "Optimizing Dummy function" << std::endl;
-        optimizer.optimize(DummyEval());
-    #else
-        std::cout << "Optimizing SNAP" << std::endl;
-        // The aggregator is already specified in the template parameters of g_optimizer
-        g_optimizer->optimize(eval, FirstElem(), false);
-    #endif
-    
-    auto optimization_end = std::chrono::high_resolution_clock::now();
-    auto optimization_duration = std::chrono::duration_cast<std::chrono::microseconds>(
-        optimization_end - iteration_start);
-    std::cout << "Optimization took: " << optimization_duration.count() / 1000.0 << " milliseconds\n";
-
-    g_best_params = g_optimizer->best_sample();  
-    SnapParams params = SnapParams::from_optimization_space(g_best_params);
-    
-    auto params_start = std::chrono::high_resolution_clock::now();
-    g_rpc->set_params(params.to_rpc_params());
-    auto params_end = std::chrono::high_resolution_clock::now();
-    auto params_duration = std::chrono::duration_cast<std::chrono::microseconds>(
-        params_end - params_start);
-    std::cout << "Setting parameters took: " << params_duration.count() << " microseconds\n";
-
-    auto iteration_end = std::chrono::high_resolution_clock::now();
-    auto total_duration = std::chrono::duration_cast<std::chrono::microseconds>(
-        iteration_end - iteration_start);
-    std::cout << "Total iteration time: " << total_duration.count() / 1000.0 << " milliseconds\n";
-    
-    return 0;
-  } catch (const std::exception& e) {
-    std::cerr << "Error in limbo optimizer iteration: " << e.what() << "\n";
-    return -1;
+    delete optimizer;
+  } catch (const std::exception &e) {
+    std::cerr << "Error destroying optimizer instance: " << e.what()
+              << std::endl;
+  } catch (...) {
+    std::cerr << "Unknown error destroying optimizer instance." << std::endl;
   }
 }
 
-// Limbo optimizer cleanup
-extern "C" int cpp_optimizer_cleanup(void) {
+CVector optimizer_act(void *optimizer_handle, const double *state_data,
+                      int state_size) {
+  if (!optimizer_handle || !state_data || state_size <= 0) {
+    return {nullptr, 0};
+  }
+  // IMPORTANT: Match the type used in create_optimizer
+  auto *optimizer = static_cast<SnapStateBOptimizer *>(optimizer_handle);
   try {
-    if (g_optimizer) {
-      delete g_optimizer;
-      g_optimizer = nullptr;
-    }
-    
-    if (g_rpc) {
-      delete g_rpc;
-      g_rpc = nullptr;
-    }
-    
-    g_initialized = false;
-    return 0;
-  } catch (const std::exception& e) {
-    std::cerr << "Error cleaning up limbo optimizer: " << e.what() << "\n";
-    return -1;
+    Eigen::VectorXd state = to_eigen_vector(state_data, state_size);
+    Eigen::VectorXd result = optimizer->act(state);
+    return to_cvector(result);
+  } catch (const std::exception &e) {
+    std::cerr << "Error in optimizer_act: " << e.what() << std::endl;
+    return {nullptr, 0};
+  } catch (...) {
+    std::cerr << "Unknown error in optimizer_act." << std::endl;
+    return {nullptr, 0};
   }
 }
+
+void optimizer_update(void *optimizer_handle, const double *sample_data,
+                      int sample_size, const double *observation_data,
+                      int observation_size) {
+  if (!optimizer_handle || !sample_data || sample_size <= 0 ||
+      !observation_data || observation_size <= 0) {
+    return;
+  }
+  // IMPORTANT: Match the type used in create_optimizer
+  auto *optimizer = static_cast<SnapStateBOptimizer *>(optimizer_handle);
+  try {
+    Eigen::VectorXd sample = to_eigen_vector(sample_data, sample_size);
+    Eigen::VectorXd observation =
+        to_eigen_vector(observation_data, observation_size);
+    optimizer->update(sample, observation);
+  } catch (const std::exception &e) {
+    std::cerr << "Error in optimizer_update: " << e.what() << std::endl;
+  } catch (...) {
+    std::cerr << "Unknown error in optimizer_update." << std::endl;
+  }
+}
+
+CVector optimizer_best_arm_prediction(void *optimizer_handle,
+                                      const double *state_data,
+                                      int state_size) {
+  if (!optimizer_handle || !state_data || state_size <= 0) {
+    return {nullptr, 0};
+  }
+  // IMPORTANT: Match the type used in create_optimizer
+  auto *optimizer = static_cast<SnapStateBOptimizer *>(optimizer_handle);
+  try {
+    Eigen::VectorXd state = to_eigen_vector(state_data, state_size);
+    Eigen::VectorXd result = optimizer->best_arm_prediction(state);
+    return to_cvector(result);
+  } catch (const std::exception &e) {
+    std::cerr << "Error in optimizer_best_arm_prediction: " << e.what()
+              << std::endl;
+    return {nullptr, 0};
+  } catch (...) {
+    std::cerr << "Unknown error in optimizer_best_arm_prediction." << std::endl;
+    return {nullptr, 0};
+  }
+}
+
+CVector optimizer_best_bo_prediction(void *optimizer_handle,
+                                     const double *state_data, int state_size) {
+  if (!optimizer_handle || !state_data || state_size <= 0) {
+    return {nullptr, 0};
+  }
+  // IMPORTANT: Match the type used in create_optimizer
+  auto *optimizer = static_cast<SnapStateBOptimizer *>(optimizer_handle);
+  try {
+    Eigen::VectorXd state = to_eigen_vector(state_data, state_size);
+    Eigen::VectorXd result = optimizer->best_bo_prediction(state);
+    return to_cvector(result);
+  } catch (const std::exception &e) {
+    std::cerr << "Error in optimizer_best_bo_prediction: " << e.what()
+              << std::endl;
+    return {nullptr, 0};
+  } catch (...) {
+    std::cerr << "Unknown error in optimizer_best_bo_prediction." << std::endl;
+    return {nullptr, 0};
+  }
+}
+
+void free_cvector_data(CVector vec) {
+  delete[] vec.data; // Matches the 'new double[]' in to_cvector
+}
+
+} // extern "C"
