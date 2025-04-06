@@ -55,9 +55,6 @@ lib.optimizer_update.argtypes = [
 lib.optimizer_best_arm_prediction.restype = CVector
 lib.optimizer_best_arm_prediction.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_double), ctypes.c_int]
 
-# CVector optimizer_best_bo_prediction(void* optimizer_handle, const double* state_data, int state_size);
-lib.optimizer_best_bo_prediction.restype = CVector
-lib.optimizer_best_bo_prediction.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_double), ctypes.c_int]
 
 # void free_cvector_data(CVector vec);
 lib.free_cvector_data.restype = None
@@ -134,15 +131,6 @@ class StateOptimizerBinding:
         result_cvector = lib.optimizer_best_arm_prediction(self._handle, state_ptr, state.size)
         return _cvector_to_numpy(result_cvector)
 
-    def best_bo_prediction(self, state: np.ndarray) -> np.ndarray:
-        '''Calls the optimizer's best_bo_prediction method.'''
-        if not self._handle:
-            raise RuntimeError("Optimizer instance is not valid.")
-        state = np.ascontiguousarray(state, dtype=np.float64)
-        state_ptr = state.ctypes.data_as(ctypes.POINTER(ctypes.c_double))
-        result_cvector = lib.optimizer_best_bo_prediction(self._handle, state_ptr, state.size)
-        return _cvector_to_numpy(result_cvector)
-
 # --- Example Usage ---
 if __name__ == "__main__":
     print("Creating optimizer...")
@@ -168,10 +156,6 @@ if __name__ == "__main__":
     print(f"\nCalling best_arm_prediction with state: {example_state}")
     arm_pred = optimizer.best_arm_prediction(example_state)
     print(f" -> Received arm prediction: {arm_pred}")
-
-    print(f"\nCalling best_bo_prediction with state: {example_state}")
-    bo_pred = optimizer.best_bo_prediction(example_state)
-    print(f" -> Received BO prediction: {bo_pred}")
 
     print("\nDestroying optimizer...")
     # Explicitly delete or let it go out of scope for __del__ to trigger
