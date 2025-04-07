@@ -59,12 +59,6 @@ struct Params {
   };
 };
 
-struct Eval {
-  BO_PARAM(size_t, dim_in, 5);
-  BO_PARAM(size_t, dim_out, 1);
-  virtual Eigen::VectorXd operator()(const Eigen::VectorXd &x) const = 0;
-};
-
 struct StateConfig {
   BO_PARAM(size_t, dim_state, 4);
 };

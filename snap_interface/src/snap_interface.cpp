@@ -14,6 +14,10 @@
 #include <cmath>
 
 #define CYCLE_TIME std::chrono::seconds(12)
+// Use a shorter cycle time during the initial random exploration phase
+#define RANDOM_CYCLE_TIME std::chrono::duration<double>(0.5) 
+// Number of initial samples defined in Params::init_randomsampling
+#define INITIAL_SAMPLE_LIMIT 50 
 #define STATS_PRINT_INTERVAL 1000
 #define DIRTY_WINDOW_MIN_LENGTH std::chrono::milliseconds(50)
 
@@ -209,7 +213,7 @@ int cpp_optimizer_iteration(void) {
             performance_metric_before = snap_optimizer_get_performance_metric();
 
             // Conditionally perform update and set_params based on reward
-            if (last_calculated_reward == 0.0) {
+            if (last_calculated_reward == 0.0 && snap_optimizer->current_iteration() > 0) {
                 std::cout << "Skipping optimizer update and set_params due to zero reward." << std::endl;
                  // NOTE: update_times vector will not get an entry for this cycle
             } else {
@@ -226,6 +230,7 @@ int cpp_optimizer_iteration(void) {
             
             auto duration_in_state = last_update_time - state_entry_time;
             std::cout << "State: UPDATING -> WAITING_FOR_PREDICTION. Observation: " << observation.transpose()
+                      << " (Reward: " << last_calculated_reward << ")" 
                       << " (Spent " << std::chrono::duration<double, std::milli>(duration_in_state).count() << "ms in UPDATING)" << std::endl;
             state_entry_time = last_update_time;
 
@@ -285,6 +290,7 @@ int cpp_optimizer_iteration(void) {
             // Calculate and print time in state, then reset timer
             auto duration_in_state = predict_end_time - state_entry_time;
             std::cout << "State: PREDICTING -> WAITING_FOR_CYCLE. Best arm: " << current_best_arm.transpose()
+                      << " (Using " << (snap_optimizer->current_iteration() >= INITIAL_SAMPLE_LIMIT ? "prediction" : "random/initial model") << ")"
                       << " (Spent " << std::chrono::duration<double, std::milli>(duration_in_state).count() << "ms in PREDICTING)" << std::endl;
             state_entry_time = predict_end_time;
 
@@ -294,10 +300,21 @@ int cpp_optimizer_iteration(void) {
 
         case OptState::WAITING_FOR_CYCLE: {
             auto elapsed = now - cycle_start_time;
-            if (elapsed >= CYCLE_TIME) {
+            // Determine target cycle time based on completed cycles
+            bool is_random_phase = (snap_optimizer->current_iteration() < INITIAL_SAMPLE_LIMIT);
+            auto target_cycle_time = (is_random_phase) ? 
+                                        RANDOM_CYCLE_TIME : 
+                                        CYCLE_TIME;
+
+            if (elapsed >= target_cycle_time) {
+
+                
                 // Calculate and print time in state, then reset timer
                 auto duration_in_state = now - state_entry_time;
-                std::cout << "State: WAITING_FOR_CYCLE -> ACTING (Cycle time elapsed)"
+                std::cout << "State: WAITING_FOR_CYCLE -> ACTING (" 
+                          << (is_random_phase ? "Random Phase - " : "Optimization Phase - ")
+                          << std::chrono::duration<double, std::milli>(target_cycle_time).count() << "ms elapsed)"
+                          << " (Cycle " << snap_optimizer->current_iteration() << "/" << INITIAL_SAMPLE_LIMIT << " random)"
                           << " (Spent " << std::chrono::duration<double, std::milli>(duration_in_state).count() << "ms in WAITING_FOR_CYCLE)" << std::endl;
                 state_entry_time = now;
 
@@ -305,7 +322,6 @@ int cpp_optimizer_iteration(void) {
             } else {
                 break;
             }
-            /* fall through */
         }
     }
 
