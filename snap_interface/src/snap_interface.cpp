@@ -14,6 +14,7 @@
 #include <cmath>
 
 #define CYCLE_TIME std::chrono::seconds(12)
+#define HYPERPARAM_WAIT_TIME std::chrono::seconds(1)
 // Use a shorter cycle time during the initial random exploration phase
 #define RANDOM_CYCLE_TIME std::chrono::duration<double>(0.5) 
 // Number of initial samples defined in Params::init_randomsampling
@@ -37,6 +38,7 @@ static SnapStateBOptimizer* snap_optimizer = nullptr;
 enum class OptState {
     ACTING,
     UPDATING,
+    WAITING_FOR_HYPERPARAMS,
     WAITING_FOR_PREDICTION,
     PREDICTING,
     WAITING_FOR_CYCLE
@@ -44,7 +46,7 @@ enum class OptState {
 
 static OptState current_op_state = OptState::ACTING;
 static Eigen::VectorXd last_sample;
-static std::chrono::high_resolution_clock::time_point last_update_time;
+static std::chrono::high_resolution_clock::time_point wait_start_time; // Used for both hyperparam and prediction waits
 static std::chrono::high_resolution_clock::time_point cycle_start_time;
 static Eigen::VectorXd current_best_arm;
 
@@ -52,6 +54,7 @@ static Eigen::VectorXd current_best_arm;
 static std::vector<std::chrono::high_resolution_clock::duration> act_times;
 static std::vector<std::chrono::high_resolution_clock::duration> update_times;
 static std::vector<std::chrono::high_resolution_clock::duration> predict_times;
+static std::vector<std::chrono::high_resolution_clock::duration> hyperparam_times;
 static int iteration_count = 0;
 
 // Add variable for tracking state entry time
@@ -130,6 +133,9 @@ void print_stats() {
     std::chrono::high_resolution_clock::duration min_predict_d, max_predict_d, avg_predict_d;
     std::tie(min_predict_d, max_predict_d, avg_predict_d) = calculate_stats(predict_times);
 
+    std::chrono::high_resolution_clock::duration min_hyperparam_d, max_hyperparam_d, avg_hyperparam_d;
+    std::tie(min_hyperparam_d, max_hyperparam_d, avg_hyperparam_d) = calculate_stats(hyperparam_times);
+
     // Convert to milliseconds only for printing
     auto to_ms = [](std::chrono::high_resolution_clock::duration d) {
         return std::chrono::duration<double, std::milli>(d).count();
@@ -142,12 +148,14 @@ void print_stats() {
     std::cout << "Act     (ms): min=" << to_ms(min_act_d) << ", max=" << to_ms(max_act_d) << ", avg=" << to_ms(avg_act_d) << " (" << act_times.size() << " calls)\n";
     std::cout << "Update  (ms): min=" << to_ms(min_update_d) << ", max=" << to_ms(max_update_d) << ", avg=" << to_ms(avg_update_d) << " (" << update_times.size() << " calls)\n";
     std::cout << "Predict (ms): min=" << to_ms(min_predict_d) << ", max=" << to_ms(max_predict_d) << ", avg=" << to_ms(avg_predict_d) << " (" << predict_times.size() << " calls)\n";
+    std::cout << "HParam  (ms): min=" << to_ms(min_hyperparam_d) << ", max=" << to_ms(max_hyperparam_d) << ", avg=" << to_ms(avg_hyperparam_d) << " (" << hyperparam_times.size() << " calls)\n";
     std::cout << "--------------------------------------------\n";
 
     // Clear duration vectors
     act_times.clear();
     update_times.clear();
     predict_times.clear();
+    hyperparam_times.clear();
     // Initialize state entry time
     state_entry_time = std::chrono::high_resolution_clock::now();
     // Get initial performance metric
@@ -174,6 +182,7 @@ int cpp_optimizer_init(void) {
     act_times.clear();
     update_times.clear();
     predict_times.clear();
+    hyperparam_times.clear();
     return 0;
 }
 
@@ -202,6 +211,8 @@ int cpp_optimizer_iteration(void) {
             state_entry_time = act_end_time;
 
             current_op_state = OptState::UPDATING;
+            // Reset wait_start_time here as UPDATING does the main work before waiting
+            wait_start_time = std::chrono::high_resolution_clock::now();
             break;
         }
 
@@ -226,20 +237,41 @@ int cpp_optimizer_iteration(void) {
             }
             
             // Proceed regardless of whether update was skipped
-            last_update_time = std::chrono::high_resolution_clock::now();
-            
-            auto duration_in_state = last_update_time - state_entry_time;
-            std::cout << "State: UPDATING -> WAITING_FOR_PREDICTION. Observation: " << observation.transpose()
+            auto update_end_time = std::chrono::high_resolution_clock::now();
+            auto duration_in_state = update_end_time - state_entry_time;
+            std::cout << "State: UPDATING -> WAITING_FOR_HYPERPARAMS. Observation: " << observation.transpose()
                       << " (Reward: " << last_calculated_reward << ")" 
                       << " (Spent " << std::chrono::duration<double, std::milli>(duration_in_state).count() << "ms in UPDATING)" << std::endl;
-            state_entry_time = last_update_time;
+            state_entry_time = update_end_time; // Reset state timer
+            wait_start_time = update_end_time; // Start the 1s hyperparam wait timer
 
-            current_op_state = OptState::WAITING_FOR_PREDICTION;
+            current_op_state = OptState::WAITING_FOR_HYPERPARAMS;
             break;
         }
 
+        case OptState::WAITING_FOR_HYPERPARAMS: {
+            auto elapsed = now - wait_start_time;
+            if (elapsed >= HYPERPARAM_WAIT_TIME) {
+                TIME_BLOCK({
+                    snap_optimizer->trigger_hyperparams_optimization();
+                }, hyperparam_times);
+
+                auto hyperparam_end_time = std::chrono::high_resolution_clock::now();
+                auto duration_in_state = hyperparam_end_time - state_entry_time;
+                std::cout << "State: WAITING_FOR_HYPERPARAMS -> WAITING_FOR_PREDICTION (1s elapsed, triggered hyperparams)" 
+                          << " (Spent " << std::chrono::duration<double, std::milli>(duration_in_state).count() << "ms in WAITING_FOR_HYPERPARAMS)" << std::endl;
+                state_entry_time = hyperparam_end_time; // Reset state timer
+                wait_start_time = hyperparam_end_time; // Start the prediction wait timer
+
+                current_op_state = OptState::WAITING_FOR_PREDICTION;
+            } else {
+                break; // Still waiting
+            }
+            /* fall through */
+        }
+
         case OptState::WAITING_FOR_PREDICTION: {
-            auto elapsed = now - last_update_time;
+            auto elapsed = now - wait_start_time; // Check against the start of this wait period
             if (elapsed >= DIRTY_WINDOW_MIN_LENGTH) {
                 // Calculate duration in state
                 auto duration_in_state = now - state_entry_time;

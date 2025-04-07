@@ -60,14 +60,22 @@ public:
                Params::init_randomsampling::samples()) {
       // Update model with new sample and observation
       this->_model.add_sample(sample, observation);
-      if (Params::bayes_opt_boptimizer::hp_period() > 0 &&
-          (this->_current_iteration + 1) %
-                  Params::bayes_opt_boptimizer::hp_period() ==
-              0)
-        this->_model.optimize_hyperparams();
     }
     this->_current_iteration++;
     this->_total_iterations++;
+  }
+
+  void trigger_hyperparams_optimization() {
+    if (!(this->_current_iteration > Params::init_randomsampling::samples())) {
+        return;
+    }
+    if (Params::bayes_opt_boptimizer::hp_period() > 0 &&
+        (this->_current_iteration + 1) % Params::bayes_opt_boptimizer::hp_period() == 0) {
+        std::cout << "SnapStateBOptimizer::trigger_hyperparams_optimization called at iteration "
+                    << this->_current_iteration << std::endl;
+        this->_model.optimize_hyperparams();
+    }
+    
   }
 
   Eigen::VectorXd best_arm_prediction(Eigen::VectorXd state) override {
