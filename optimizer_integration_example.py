@@ -1,12 +1,29 @@
 import numpy as np
 from optimization.env import MultiDimensionParabolic
+from optimization.optimizer import LimboOptimizer
+from optimization.opt_analysis import create_optimizer_analyzer
 from optimizer_binding import StateOptimizerBinding
-env = MultiDimensionParabolic(dim=5,a0=np.ones(5)/5) #Optimal point at (0.2,...,0.2)
-optimizer = StateOptimizerBinding()
-for i in range(100):
-    example_state = np.array([1.0, 2.0, 100.0, 50.0], dtype=np.float64) 
-    action = optimizer.act(example_state)
-    _,reward,_,_,_= env.step(action)
-    print(reward)
-    reward = np.array([-reward], dtype=np.float64)
-    optimizer.update(action, reward)
+
+dim = 5
+minimize = True
+optimal_point = np.arange(5)*3
+use_analysis = True
+env = MultiDimensionParabolic(dim=dim,a0=optimal_point)
+
+optimization_params = {
+        'parameters' : [{
+                "name": f'x{i}',
+                "type": "range",
+                "bounds": [-100.0, 100.0],
+                    } for i in range(dim)],
+        'minimize' : minimize,
+        'min_reward_range' : 0,
+        'max_reward_range' : 500,
+}
+
+
+optimizer = LimboOptimizer(optimization_params,env,figure_save_path='figures') if not use_analysis else create_optimizer_analyzer(LimboOptimizer)(optimization_params,env,figure_save_path='figures')
+
+optimizer.optimize(150)
+optimizer.save_figures('png')
+optimizer.save_figures('html')
