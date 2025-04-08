@@ -5,12 +5,14 @@ Python binding for the Limbo StateBOptimizer using ctypes.
 import ctypes
 import numpy as np
 import os
+import platform # Added for library extension
 
 # --- Configuration ---
 # TODO: Adjust this path to the actual location of your compiled shared library
 # Common locations might be 'build/src/liblimbo.so' or similar
 # Ensure the library name matches what Meson produces (e.g., .so on Linux, .dll on Windows)
-LIBRARY_PATH = os.path.join(os.path.dirname(__file__), 'build', 'liblimbo.so') 
+LIB_SUFFIX = '.dll' if platform.system() == "Windows" else '.so'
+LIBRARY_PATH = os.path.join(os.path.dirname(__file__), 'build', f'liblimbo_interface{LIB_SUFFIX}')
 # --- End Configuration ---
 
 # --- ctypes Definitions ---
@@ -20,19 +22,42 @@ class CVector(ctypes.Structure):
     _fields_ = [("data", ctypes.POINTER(ctypes.c_double)),
                 ("size", ctypes.c_int)]
 
+# Define the function pointer type for the optimizer factory
+OptimizerFactoryFunc = ctypes.CFUNCTYPE(ctypes.c_void_p)
+
 # Load the shared library
 try:
     lib = ctypes.CDLL(LIBRARY_PATH)
 except OSError as e:
     print(f"Error loading library at {LIBRARY_PATH}: {e}")
     print("Please ensure the library exists and the LIBRARY_PATH variable is set correctly.")
+    print("Common causes: ")
+    print("  - Project not built (run 'meson setup build && meson compile -C build')")
+    print(f"  - Incorrect LIBRARY_PATH (current: {LIBRARY_PATH})")
+    print("  - Architecture mismatch (e.g., 32-bit Python vs 64-bit library)")
     exit(1)
 
 # --- Function Prototypes ---
 
-# void* create_optimizer();
+# void* create_optimizer_instance(); // Factory function exported from C++
+# This should be the name of the factory function exported from C++
+# (both in snap_interface.cpp and dummy_interface.cpp).
+try:
+    lib.create_optimizer_instance.restype = ctypes.c_void_p
+    lib.create_optimizer_instance.argtypes = []
+    # We load it here to check existence, but get it again in __init__
+    # This helps provide an earlier error if the symbol is missing.
+except AttributeError:
+    print("Error: Could not find symbol 'create_optimizer_instance' in the library.")
+    print("Please ensure the factory function is correctly defined, exported (using extern \"C\"), and named in both snap and dummy C++ code.")
+    # Decide if exit is appropriate or if a dummy could be used later
+    # For now, exiting is clearer.
+    exit(1)
+
+
+# void* create_optimizer(OptimizerFactoryFunc factory_func);
 lib.create_optimizer.restype = ctypes.c_void_p
-lib.create_optimizer.argtypes = []
+lib.create_optimizer.argtypes = [OptimizerFactoryFunc] # Updated argtypes
 
 # void destroy_optimizer(void* optimizer_handle);
 lib.destroy_optimizer.restype = None
@@ -90,10 +115,30 @@ class StateOptimizerBinding:
     Methods expect and return NumPy arrays.
     '''
     def __init__(self):
-        '''Initializes the optimizer by calling the C++ create_optimizer.'''
-        self._handle = lib.create_optimizer()
+        '''Initializes the optimizer by calling the C++ create_optimizer with the factory.'''
+        # Get the factory function pointer from the loaded library
+        try:
+             # Make sure the factory symbol name matches your C++ export
+            # This assumes the dummy build will also export a factory with the *same name*
+            # If the dummy factory has a different name, this logic needs adjustment,
+            # potentially checking an environment variable or configuration.
+            factory_func_ptr = getattr(lib, 'create_optimizer_instance') # Use the unified name
+            # Redefine argtypes/restype just in case (though checked above)
+            factory_func_ptr.restype = ctypes.c_void_p
+            factory_func_ptr.argtypes = []
+            # Create the ctypes function pointer object
+            c_factory_func = OptimizerFactoryFunc(factory_func_ptr)
+            # Call the C++ create_optimizer, passing the factory function
+            self._handle = lib.create_optimizer(c_factory_func)
+        except AttributeError:
+             # This error *shouldn't* happen if the check above passed, but belts and suspenders
+             raise RuntimeError("Failed to find C++ factory function 'create_optimizer_instance'. Ensure it's exported correctly in both snap and dummy builds.") # Use the unified name
+        except Exception as e:
+            # Catch other potential errors during creation
+            raise RuntimeError(f"Error during optimizer creation: {e}")
+
         if not self._handle:
-            raise RuntimeError("Failed to create C++ optimizer instance.")
+            raise RuntimeError("Failed to create C++ optimizer instance via factory (returned NULL).")
         print("Optimizer instance created.")
 
     def __del__(self):
