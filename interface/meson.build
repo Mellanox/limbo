@@ -1,19 +1,12 @@
 
-
-
-src_files = files(
+interface_sources += files(
     'src/interface.cpp'
 )
-
-
-interface_lib = library('interface_lib', src_files,
-  include_directories : [include_directories('include')]+[limbo_inc],
-  dependencies: dependencies,
-  link_with: limbo_lib,
-  install : true
-)
+interface_include += include_directories('include')
 
 install_headers(
   'include/public/interface.hpp',
-  subdir : 'interface' 
+  'include/public/stateboptimizer.hpp',
+  subdir : 'interface'
 )
+

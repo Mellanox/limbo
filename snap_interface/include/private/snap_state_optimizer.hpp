@@ -1,6 +1,6 @@
+#include "snap_optimizer_interface.h"
+#include <public/stateboptimizer.hpp>
 
-
-#include "snap_state_optimizer.h"
 template <typename EvalHandler>
 class SnapStateBOptimizer
     : public StateBOptimizer<Params, modelfun<gp_t>, acquifun<acqui_t>,

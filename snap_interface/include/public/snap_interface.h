@@ -1,4 +1,4 @@
-
+extern "C" {
 /**
  * @brief Initialize the Limbo Bayesian optimizer
  *
@@ -37,3 +37,4 @@ int cpp_optimizer_iteration(void);
  * @return 0 on success, negative value on error
  */
 int cpp_optimizer_cleanup(void);
+}

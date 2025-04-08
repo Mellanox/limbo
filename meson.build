@@ -48,21 +48,24 @@ limbo_lib = library('limbo',
 )
 
 install_subdir('src/limbo', install_dir: 'include')
-
-snap_inc = include_directories('snap_interface')
+install_subdir('interface', install_dir: 'include')
 all_includes = [limbo_inc]
+interface_include = []
+interface_sources = []
 subdir('interface')
-
+all_includes+=interface_include
+snap_inc = []
+snap_sources = []
 if not get_option('dummy')
   subdir('snap_interface')
   all_includes += [snap_inc]
 endif
-
+message('interface_sources: ', interface_sources.length())
 limbo_dep = declare_dependency(
     link_with: limbo_lib,
     include_directories: all_includes,
     sources: [
         'src/limbo/limbo.hpp'
-    ],
+    ] +snap_sources + interface_sources,
     dependencies: dependencies
 )

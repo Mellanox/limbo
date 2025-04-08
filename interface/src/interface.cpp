@@ -1,4 +1,4 @@
-#include "private/priv_interface.hpp"
+#include "public/stateboptimizer.hpp"
 #include "public/interface.hpp"
 #include <algorithm>
 #include <chrono>
