@@ -5,57 +5,25 @@
 extern "C" {
 #endif
 
-/**
- * @brief Initialize the Limbo Bayesian optimizer
- *
- * This function initializes the optimizer by:
- * - Creating the SNAP RPC interface
- * - Setting up the Bayesian optimization framework
- *
- * @return 0 on success, negative value on error
- */
-int cpp_optimizer_init(void);
-
-/**
- * @brief Perform one optimization iteration
- *
- * This function performs one optimization step:
- * - Get initial reward using SNAP performance metrics
- * - Wait 50ms
- * - Get reward again
- * - Calculate new parameter values based on optimization
- * - Set parameters in the SNAP system
- *
- * The optimizer attempts to maximize the reward value over time
- * by intelligently exploring the parameter space.
- *
- * @return 0 on success, negative value on error
- */
-int cpp_optimizer_iteration(void);
-
-/**
- * @brief Clean up resources used by the optimizer
- *
- * This function performs cleanup by:
- * - Freeing memory associated with the optimizer
- * - Closing the SNAP RPC connection
- *
- * @return 0 on success, negative value on error
- */
-int cpp_optimizer_cleanup(void);
-
-// C-compatible struct to return vector data
 struct CVector {
   double *data;
   int size;
 };
 
 /**
- * @brief Create a new SnapStateBOptimizer instance
+ * @brief Function pointer type for a factory function that creates an optimizer instance.
+ * The factory function should return an opaque pointer (handle) to the
+ * concrete optimizer instance, or NULL on error.
+ */
+typedef void* (*OptimizerFactoryFunc)(void);
+
+/**
+ * @brief Create a new optimizer instance using a provided factory function.
  *
+ * @param factory_func A function pointer that creates and returns the optimizer.
  * @return Opaque pointer (handle) to the optimizer instance, or NULL on error.
  */
-void *create_optimizer();
+void *create_optimizer(OptimizerFactoryFunc factory_func);
 
 /**
  * @brief Destroy a SnapStateBOptimizer instance
