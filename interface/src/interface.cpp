@@ -15,8 +15,6 @@
 #include <sys/un.h>
 #include <unistd.h>
 
-static StateBOptimizer<Eval> *g_optimizer = nullptr;
-
 Eigen::VectorXd to_eigen_vector(const double *data, int size) {
   return Eigen::Map<const Eigen::VectorXd>(data, size);
 }

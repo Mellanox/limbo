@@ -53,19 +53,39 @@ all_includes = [limbo_inc]
 interface_include = []
 interface_sources = []
 subdir('interface')
-all_includes+=interface_include
-snap_inc = []
-snap_sources = []
-if not get_option('dummy')
+all_includes += interface_include
+
+# Define variables for conditional sources/includes
+specific_sources = []
+specific_inc = []
+
+if get_option('dummy')
+  message('Building with DUMMY interface')
+  subdir('dummy_interface')
+  specific_sources += dummy_sources
+  specific_inc += dummy_inc
+  message('Specific sources: ', specific_inc.length())
+else
+  message('Building with SNAP interface')
   subdir('snap_interface')
-  all_includes += [snap_inc]
+  specific_sources += snap_sources
+  specific_inc += snap_inc
 endif
-message('interface_sources: ', interface_sources.length())
+all_includes += specific_inc
+message('All includes: ', all_includes.length())
+message('Total interface-specific sources: ', specific_sources.length())
 limbo_dep = declare_dependency(
     link_with: limbo_lib,
     include_directories: all_includes,
-    sources: [
+    sources: interface_sources + specific_sources + [
         'src/limbo/limbo.hpp'
-    ] +snap_sources + interface_sources,
+    ], # Combine core interface + specific sources
     dependencies: dependencies
 )
+if get_option('dummy')
+    limbo_library_interfaced = library('limbo_interface',
+        include_directories: [all_includes],
+        dependencies: limbo_dep,
+        install: true
+    )
+endif

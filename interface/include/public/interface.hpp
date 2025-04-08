@@ -72,19 +72,6 @@ CVector optimizer_best_arm_prediction(void *optimizer_handle,
                                       const double *state_data, int state_size);
 
 /**
- * @brief Call the best_bo_prediction method of the optimizer
- *
- * @param optimizer_handle Handle to the optimizer instance
- * @param state_data Pointer to the input state vector data
- * @param state_size Size of the input state vector
- * @return CVector struct containing pointer to the result vector data and its
- * size. The caller is responsible for freeing the data using
- * free_cvector_data().
- */
-CVector optimizer_best_bo_prediction(void *optimizer_handle,
-                                     const double *state_data, int state_size);
-
-/**
  * @brief Free memory allocated for a CVector's data
  *
  * @param vec The CVector whose data needs freeing.
