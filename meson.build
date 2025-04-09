@@ -6,23 +6,17 @@ project('limbo', 'cpp',
     'buildtype=release'
   ]
 )
-# Define required preprocessor macros
 add_project_arguments('-DUSE_NLOPT', '-DUSE_LIBCMAES', language: 'cpp')
 
-# Find required dependencies
 boost_dep = dependency('boost', required: true, modules: ['filesystem'])
-#tbb_dep = dependency('tbb', required: true)
 eigen_dep = dependency('eigen3', required: true, include_type: 'system')
-spdlog_dep = dependency('spdlog', required: true)
 nlopt_dep = dependency('nlopt', required: true)
 libcmaes_dep = dependency('libcmaes', required: true)
 openmp_dep = dependency('openmp', required: true)
 
 dependencies = [
     boost_dep,
-    #tbb_dep,
     eigen_dep,
-    spdlog_dep,
     nlopt_dep,
     libcmaes_dep,
     openmp_dep
@@ -41,37 +35,57 @@ args = [
     '-Wno-error=unused-but-set-variable',  # Disable treating unused but set variables as errors
 ]
 
-# Define include directories
+
 limbo_inc = include_directories('src')
-snap_inc = include_directories('.') # Include current dir for snap_optimizer/ header
-
-all_includes = [limbo_inc]
-if get_option('dummy')
-  all_includes += [snap_inc]
-endif
-
-# Create interface library target
 limbo_lib = library('limbo',
-    sources: ['interface.cpp'],
-    include_directories: all_includes,
     cpp_args: args + [
-        '-DUSE_NLOPT',  # Always define USE_NLOPT since we're using it
-        '-DUSE_LIBCMAES',  # Always define USE_LIBCMAES since we're using it
+        '-DUSE_NLOPT',
+        '-DUSE_LIBCMAES',
     ],
-    dependencies: dependencies
+    include_directories: limbo_inc,
+    dependencies: dependencies,
+    install: true
 )
 
-# Install the limbo headers
 install_subdir('src/limbo', install_dir: 'include')
+install_subdir('interface', install_dir: 'include')
+all_includes = [limbo_inc]
+interface_include = []
+interface_sources = []
+subdir('interface')
+all_includes += interface_include
+
+# Define variables for conditional sources/includes
+specific_sources = []
+specific_inc = []
+
 if get_option('dummy')
-    install_subdir('snap_optimizer', install_dir: 'include/snap_optimizer')
+  message('Building with DUMMY interface')
+  subdir('dummy_interface')
+  specific_sources += dummy_sources
+  specific_inc += dummy_inc
+  message('Specific sources: ', specific_inc.length())
+else
+  message('Building with SNAP interface')
+  subdir('snap_interface')
+  specific_sources += snap_sources
+  specific_inc += snap_inc
 endif
-# Create dependency object that includes both library and interface files
+all_includes += specific_inc
+message('All includes: ', all_includes.length())
+message('Total interface-specific sources: ', specific_sources.length())
 limbo_dep = declare_dependency(
     link_with: limbo_lib,
     include_directories: all_includes,
-    sources: [
-        'src/limbo/limbo.hpp'  # Add the main limbo header that defines the namespace
-    ],
+    sources: interface_sources + specific_sources + [
+        'src/limbo/limbo.hpp'
+    ], # Combine core interface + specific sources
     dependencies: dependencies
 )
+if get_option('dummy')
+    limbo_library_interfaced = library('limbo_interface',
+        include_directories: [all_includes],
+        dependencies: limbo_dep,
+        install: true
+    )
+endif
