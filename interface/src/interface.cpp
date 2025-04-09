@@ -10,18 +10,9 @@
 #include <string>
 #include <thread>
 #include <vector>
-
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
-#include <limbo/defaults.hpp>
-
-// Define a type alias for the specific StateBOptimizer instantiation
-using OptimizerBase = StateBOptimizer<limbo::Params, limbo::modelfun<limbo::defaults::gp_t>,
-                                     limbo::acquifun<limbo::defaults::acqui_t>,
-                                     limbo::acquiopt<limbo::defaults::acqui_opt_t>,
-                                     limbo::initfun<limbo::defaults::init_t>,
-                                     limbo::statsfun<limbo::defaults::stat_t>>;
 
 Eigen::VectorXd to_eigen_vector(const double *data, int size) {
   return Eigen::Map<const Eigen::VectorXd>(data, size);
@@ -64,7 +55,7 @@ void destroy_optimizer(void *optimizer_handle) {
   if (!optimizer_handle)
     return;
   // Cast to the base type alias
-  auto *optimizer = static_cast<OptimizerBase *>(optimizer_handle);
+  auto *optimizer = static_cast<IOptimizer *>(optimizer_handle);
   try {
     delete optimizer;
   } catch (const std::exception &e) {
@@ -85,7 +76,7 @@ CVector optimizer_act(void *optimizer_handle, const double *state_data,
   }
 
   // Cast to the base type alias
-  auto *optimizer = static_cast<OptimizerBase *>(optimizer_handle);
+  auto *optimizer = static_cast<IOptimizer *>(optimizer_handle);
   try {
     Eigen::VectorXd state = to_eigen_vector(state_data, state_size);
     std::cout << "DEBUG: optimizer_act received state of dimension "
@@ -120,7 +111,7 @@ void optimizer_update(void *optimizer_handle, const double *sample_data,
     return;
   }
   // Cast to the base type alias
-  auto *optimizer = static_cast<OptimizerBase *>(optimizer_handle);
+  auto *optimizer = static_cast<IOptimizer *>(optimizer_handle);
   try {
     Eigen::VectorXd sample = to_eigen_vector(sample_data, sample_size);
     Eigen::VectorXd observation =
@@ -151,7 +142,7 @@ CVector optimizer_best_arm_prediction(void *optimizer_handle,
   }
 
   // Cast to the base type alias
-  auto *optimizer = static_cast<OptimizerBase *>(optimizer_handle);
+  auto *optimizer = static_cast<IOptimizer *>(optimizer_handle);
   try {
     Eigen::VectorXd state = to_eigen_vector(state_data, state_size);
 

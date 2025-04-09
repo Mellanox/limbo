@@ -1,6 +1,14 @@
 #pragma once
 #include <Eigen/Core>
 #include <limbo/limbo.hpp>
+class IOptimizer {
+public:
+  virtual ~IOptimizer() = default;
+  virtual Eigen::VectorXd act(Eigen::VectorXd state) = 0;
+  virtual void update(Eigen::VectorXd sample, Eigen::VectorXd observation) = 0;
+  virtual Eigen::VectorXd best_arm_prediction(Eigen::VectorXd state) = 0;
+};
+
 using namespace limbo;
 using namespace limbo::tools;
 
@@ -87,7 +95,8 @@ template <
     class A4 = boost::parameter::void_, class A5 = boost::parameter::void_,
     class A6 = boost::parameter::void_>
 class StateBOptimizer
-    : public limbo::bayes_opt::BoBase<Params, A1, A2, A3, A4, A5, A6> {
+    : public limbo::bayes_opt::BoBase<Params, A1, A2, A3, A4, A5, A6>,
+      public IOptimizer { // Inherit from IOptimizer
 public:
   virtual ~StateBOptimizer() = default;
   using base_t = limbo::bayes_opt::BoBase<Params, A1, A2, A3, A4, A5, A6>;

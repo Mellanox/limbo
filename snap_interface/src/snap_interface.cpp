@@ -27,14 +27,8 @@
         RESULT_VECTOR.push_back(_macro_end_time - _macro_start_time); \
     } while (0)
 
-struct SumEval : public Eval {
-    Eigen::VectorXd operator()(const Eigen::VectorXd &x) const override {
-        double val = x.array().sum();
-        return Eigen::VectorXd::Constant(1, val);
-    }
-};
-static SumEval sum_eval;
-static SnapStateBOptimizer<SumEval>* snap_optimizer = nullptr;
+
+static SnapStateBOptimizer* snap_optimizer = nullptr;
 
 enum class OptState {
     ACTING,
@@ -157,13 +151,15 @@ void print_stats() {
     return;
 }
 
-void* snap_optimizer_factory(void) {
-    return new SnapStateBOptimizer<SumEval>(sum_eval);
+// Factory function now takes dimensions
+void* snap_optimizer_factory(int dim_in, int dim_out) {
+    // Pass dimensions to the constructor
+    return new SnapStateBOptimizer(dim_in, dim_out);
 }
 extern "C" {
 int cpp_optimizer_init(void) {
-    void* handle = create_optimizer(&snap_optimizer_factory);
-    snap_optimizer = static_cast<SnapStateBOptimizer<SumEval>*>(handle);
+    void* handle = create_optimizer(&snap_optimizer_factory, 5, 1);
+    snap_optimizer = static_cast<SnapStateBOptimizer*>(handle);
 
     if (!snap_optimizer) {
         std::cerr << "Error: Failed to create optimizer instance." << std::endl;
@@ -187,7 +183,8 @@ int cpp_optimizer_iteration(void) {
 
     switch (current_op_state) {
         case OptState::ACTING: {
-            Eigen::VectorXd current_state = Eigen::VectorXd::Zero(SumEval::dim_in());
+            // Use the getter method for dimension
+            Eigen::VectorXd current_state = Eigen::VectorXd::Zero(snap_optimizer->get_dim_in());
 
             
             TIME_BLOCK({
@@ -272,9 +269,9 @@ int cpp_optimizer_iteration(void) {
         }
 
         case OptState::PREDICTING: {
-            Eigen::VectorXd current_state = Eigen::VectorXd::Zero(SumEval::dim_in());
+            // Use the getter method for dimension
+             Eigen::VectorXd current_state = Eigen::VectorXd::Zero(snap_optimizer->get_dim_in());
 
-            
             TIME_BLOCK({
                 current_best_arm = snap_optimizer->best_arm_prediction(current_state);
                 // Call helper function to apply scaled params

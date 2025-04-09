@@ -92,6 +92,10 @@ public:
     return result;
   }
 
+  // Add public getters for dimensions
+  int get_dim_in() const { return _dim_in; }
+  int get_dim_out() const { return _dim_out; }
+
 protected:
   Eigen::VectorXd _model_prediction(Eigen::VectorXd params,
                                     Eigen::VectorXd state) {
