@@ -15,15 +15,17 @@ struct CVector {
  * The factory function should return an opaque pointer (handle) to the
  * concrete optimizer instance, or NULL on error.
  */
-typedef void* (*OptimizerFactoryFunc)(void);
+typedef void* (*OptimizerFactoryFunc)(int dim_in, int dim_out);
 
 /**
  * @brief Create a new optimizer instance using a provided factory function.
  *
  * @param factory_func A function pointer that creates and returns the optimizer.
+ * @param dim_in The input dimension for the optimizer.
+ * @param dim_out The output dimension for the optimizer.
  * @return Opaque pointer (handle) to the optimizer instance, or NULL on error.
  */
-void *create_optimizer(OptimizerFactoryFunc factory_func);
+void *create_optimizer(OptimizerFactoryFunc factory_func, int dim_in, int dim_out);
 
 /**
  * @brief Destroy a SnapStateBOptimizer instance

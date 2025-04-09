@@ -8,7 +8,6 @@
 using namespace limbo;
 using namespace limbo::defaults;
 
-template <typename EvalHandler>
 class DummyStateBOptimizer
     : public StateBOptimizer<Params, modelfun<gp_t>, acquifun<acqui_t>,
                              acquiopt<acqui_opt_t>, initfun<init_t>,
@@ -21,8 +20,9 @@ public:
   using acquisition_function_t = typename base_t::acquisition_function_t;
   using acqui_optimizer_t = typename base_t::acqui_optimizer_t;
 
-  DummyStateBOptimizer(EvalHandler &e) : base_t(), _eval_handler(e) {
-    this->_model = model_t(EvalHandler::dim_in(), EvalHandler::dim_out());
+  DummyStateBOptimizer(int dim_in, int dim_out)
+    : base_t(), _dim_in(dim_in), _dim_out(dim_out) { 
+    this->_model = model_t(_dim_in, _dim_out);
   }
 
   Eigen::VectorXd act(Eigen::VectorXd state) override {
@@ -31,7 +31,7 @@ public:
 
     if (this->_current_iteration < Params::init_randomsampling::samples()) {
       Eigen::VectorXd starting_point = tools::random_vector(
-          this->_model.dim_in(), Params::bayes_opt_bobase::bounded());
+          _dim_in, Params::bayes_opt_bobase::bounded());
       return starting_point;
     }
 
@@ -42,7 +42,7 @@ public:
       return acqui(x, FirstElem(), g);
     };
     Eigen::VectorXd starting_point = tools::random_vector(
-        EvalHandler::dim_in(), Params::bayes_opt_bobase::bounded());
+        _dim_in, Params::bayes_opt_bobase::bounded());
     Eigen::VectorXd new_sample =
         acqui_optimizer(acqui_optimization, starting_point,
                         Params::bayes_opt_bobase::bounded());
@@ -94,7 +94,7 @@ public:
     // uncertainty (should be returned as vector of size dim + 2?)
     Eigen::VectorXd reward_prediction =
         this->_model_prediction(best_arm, state);
-    Eigen::VectorXd result(EvalHandler::dim_in() + 2);
+    Eigen::VectorXd result(_dim_in + 2);
     result << best_arm, reward_prediction;
     return result;
   }
@@ -117,6 +117,7 @@ protected:
     return Eigen::VectorXd::Zero(StateConfig::dim_state());
   }
 
-  EvalHandler &get_eval_handler() { return _eval_handler; }
-  EvalHandler &_eval_handler;
+private:
+  int _dim_in;
+  int _dim_out;
 };

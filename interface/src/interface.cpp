@@ -14,6 +14,14 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
+#include <limbo/defaults.hpp>
+
+// Define a type alias for the specific StateBOptimizer instantiation
+using OptimizerBase = StateBOptimizer<limbo::Params, limbo::modelfun<limbo::defaults::gp_t>,
+                                     limbo::acquifun<limbo::defaults::acqui_t>,
+                                     limbo::acquiopt<limbo::defaults::acqui_opt_t>,
+                                     limbo::initfun<limbo::defaults::init_t>,
+                                     limbo::statsfun<limbo::defaults::stat_t>>;
 
 Eigen::VectorXd to_eigen_vector(const double *data, int size) {
   return Eigen::Map<const Eigen::VectorXd>(data, size);
@@ -28,14 +36,14 @@ CVector to_cvector(const Eigen::VectorXd &vec) {
 }
 extern "C" {
 
-void *create_optimizer(OptimizerFactoryFunc factory_func) {
+void *create_optimizer(OptimizerFactoryFunc factory_func, int dim_in, int dim_out) {
   try {
     if (!factory_func) {
       std::cerr << "Error: Optimizer factory function is null." << std::endl;
       return nullptr;
     }
-    // Call the provided factory function to get the optimizer instance
-    void *optimizer_handle = factory_func(); 
+    // Call the provided factory function with dimensions
+    void *optimizer_handle = factory_func(dim_in, dim_out); 
     if (!optimizer_handle) {
       std::cerr << "Error: Optimizer factory function returned null." << std::endl;
       return nullptr;
@@ -55,7 +63,8 @@ void *create_optimizer(OptimizerFactoryFunc factory_func) {
 void destroy_optimizer(void *optimizer_handle) {
   if (!optimizer_handle)
     return;
-  auto *optimizer = static_cast<StateBOptimizer<Eval> *>(optimizer_handle);
+  // Cast to the base type alias
+  auto *optimizer = static_cast<OptimizerBase *>(optimizer_handle);
   try {
     delete optimizer;
   } catch (const std::exception &e) {
@@ -75,7 +84,8 @@ CVector optimizer_act(void *optimizer_handle, const double *state_data,
     return {nullptr, 0};
   }
 
-  auto *optimizer = static_cast<StateBOptimizer<Eval> *>(optimizer_handle);
+  // Cast to the base type alias
+  auto *optimizer = static_cast<OptimizerBase *>(optimizer_handle);
   try {
     Eigen::VectorXd state = to_eigen_vector(state_data, state_size);
     std::cout << "DEBUG: optimizer_act received state of dimension "
@@ -109,7 +119,8 @@ void optimizer_update(void *optimizer_handle, const double *sample_data,
       !observation_data || observation_size <= 0) {
     return;
   }
-  auto *optimizer = static_cast<StateBOptimizer<Eval> *>(optimizer_handle);
+  // Cast to the base type alias
+  auto *optimizer = static_cast<OptimizerBase *>(optimizer_handle);
   try {
     Eigen::VectorXd sample = to_eigen_vector(sample_data, sample_size);
     Eigen::VectorXd observation =
@@ -139,7 +150,8 @@ CVector optimizer_best_arm_prediction(void *optimizer_handle,
     return {nullptr, 0};
   }
 
-  auto *optimizer = static_cast<StateBOptimizer<Eval> *>(optimizer_handle);
+  // Cast to the base type alias
+  auto *optimizer = static_cast<OptimizerBase *>(optimizer_handle);
   try {
     Eigen::VectorXd state = to_eigen_vector(state_data, state_size);
 

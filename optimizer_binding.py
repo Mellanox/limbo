@@ -23,7 +23,8 @@ class CVector(ctypes.Structure):
                 ("size", ctypes.c_int)]
 
 # Define the function pointer type for the optimizer factory
-OptimizerFactoryFunc = ctypes.CFUNCTYPE(ctypes.c_void_p)
+# Updated to match C definition: void* (*)(int, int)
+OptimizerFactoryFunc = ctypes.CFUNCTYPE(ctypes.c_void_p, ctypes.c_int, ctypes.c_int)
 
 # Load the shared library
 try:
@@ -39,25 +40,25 @@ except OSError as e:
 
 # --- Function Prototypes ---
 
-# void* create_optimizer_instance(); // Factory function exported from C++
+# void* create_optimizer_instance(int dim_in, int dim_out); // Factory function exported from C++
 # This should be the name of the factory function exported from C++
 # (both in snap_interface.cpp and dummy_interface.cpp).
+# It MUST now accept dim_in and dim_out.
+FACTORY_SYMBOL_NAME = 'create_optimizer_instance' # Assuming this name is used consistently
 try:
-    lib.create_optimizer_instance.restype = ctypes.c_void_p
-    lib.create_optimizer_instance.argtypes = []
-    # We load it here to check existence, but get it again in __init__
-    # This helps provide an earlier error if the symbol is missing.
+    # Check for the factory symbol's existence
+    getattr(lib, FACTORY_SYMBOL_NAME)
 except AttributeError:
-    print("Error: Could not find symbol 'create_optimizer_instance' in the library.")
+    print(f"Error: Could not find symbol '{FACTORY_SYMBOL_NAME}' in the library.")
     print("Please ensure the factory function is correctly defined, exported (using extern \"C\"), and named in both snap and dummy C++ code.")
-    # Decide if exit is appropriate or if a dummy could be used later
-    # For now, exiting is clearer.
+    print("The factory function must now accept (int dim_in, int dim_out).")
     exit(1)
 
 
-# void* create_optimizer(OptimizerFactoryFunc factory_func);
+# void* create_optimizer(OptimizerFactoryFunc factory_func, int dim_in, int dim_out);
 lib.create_optimizer.restype = ctypes.c_void_p
-lib.create_optimizer.argtypes = [OptimizerFactoryFunc] # Updated argtypes
+# Updated argtypes
+lib.create_optimizer.argtypes = [OptimizerFactoryFunc, ctypes.c_int, ctypes.c_int]
 
 # void destroy_optimizer(void* optimizer_handle);
 lib.destroy_optimizer.restype = None
@@ -114,32 +115,37 @@ class StateOptimizerBinding:
     Manages the lifecycle and provides methods to interact with the optimizer.
     Methods expect and return NumPy arrays.
     '''
-    def __init__(self):
+    # Updated __init__ to accept dimensions
+    def __init__(self, dim_in: int = 5, dim_out: int = 1):
         '''Initializes the optimizer by calling the C++ create_optimizer with the factory.'''
+        if not isinstance(dim_in, int) or dim_in <= 0:
+            raise ValueError("dim_in must be a positive integer")
+        if not isinstance(dim_out, int) or dim_out <= 0:
+             raise ValueError("dim_out must be a positive integer")
+            
+        self.dim_in = dim_in
+        self.dim_out = dim_out
+
         # Get the factory function pointer from the loaded library
         try:
-             # Make sure the factory symbol name matches your C++ export
-            # This assumes the dummy build will also export a factory with the *same name*
-            # If the dummy factory has a different name, this logic needs adjustment,
-            # potentially checking an environment variable or configuration.
-            factory_func_ptr = getattr(lib, 'create_optimizer_instance') # Use the unified name
-            # Redefine argtypes/restype just in case (though checked above)
+            factory_func_ptr = getattr(lib, FACTORY_SYMBOL_NAME)
+            # Define argtypes/restype for the *specific* factory function pointer
             factory_func_ptr.restype = ctypes.c_void_p
-            factory_func_ptr.argtypes = []
-            # Create the ctypes function pointer object
+            # Factory now takes dim_in, dim_out
+            factory_func_ptr.argtypes = [ctypes.c_int, ctypes.c_int] 
+            # Create the ctypes function pointer object for the factory type
             c_factory_func = OptimizerFactoryFunc(factory_func_ptr)
-            # Call the C++ create_optimizer, passing the factory function
-            self._handle = lib.create_optimizer(c_factory_func)
+            
+            # Call the C++ create_optimizer, passing the factory function AND dimensions
+            self._handle = lib.create_optimizer(c_factory_func, self.dim_in, self.dim_out)
         except AttributeError:
-             # This error *shouldn't* happen if the check above passed, but belts and suspenders
-             raise RuntimeError("Failed to find C++ factory function 'create_optimizer_instance'. Ensure it's exported correctly in both snap and dummy builds.") # Use the unified name
+             raise RuntimeError(f"Failed to find C++ factory function '{FACTORY_SYMBOL_NAME}'. Ensure it's exported correctly and accepts (int, int).")
         except Exception as e:
-            # Catch other potential errors during creation
             raise RuntimeError(f"Error during optimizer creation: {e}")
 
         if not self._handle:
             raise RuntimeError("Failed to create C++ optimizer instance via factory (returned NULL).")
-        print("Optimizer instance created.")
+        print(f"Optimizer instance created with dim_in={self.dim_in}, dim_out={self.dim_out}.")
 
     def __del__(self):
         '''Cleans up the optimizer instance when the Python object is garbage collected.'''
@@ -179,11 +185,18 @@ class StateOptimizerBinding:
 # --- Example Usage ---
 if __name__ == "__main__":
     print("Creating optimizer...")
-    optimizer = StateOptimizerBinding()
+    # Example dimensions (MUST match what the optimizer expects)
+    # dim_in often corresponds to the number of parameters being optimized
+    # dim_out is often 1 (for a single reward/objective signal)
+    example_dim_in = 5 
+    example_dim_out = 1
+    optimizer = StateOptimizerBinding(dim_in=example_dim_in, dim_out=example_dim_out)
 
     # Example state vector (adjust size based on your actual state dimension)
-    # The SnapStateBOptimizer::get_state() uses size 4
-    example_state = np.array([1.0, 2.0, 100.0, 50.0], dtype=np.float64) 
+    # SnapStateBOptimizer::get_state() seems to use size 4 - this might be unrelated
+    # to dim_in/dim_out but rather a fixed state representation.
+    # Let's assume state size is fixed at 4 for the example.
+    example_state = np.array([1.0, 2.0, 100.0, 50.0], dtype=np.float64)
 
     print(f"\nCalling act with state: {example_state}")
     action = optimizer.act(example_state)
@@ -192,8 +205,9 @@ if __name__ == "__main__":
     # Example sample and observation vectors (adjust sizes based on your needs)
     # act() returns the prediction, which is the sample for the next update
     # observation would typically be the measured outcome (e.g., reward/IOPS)
-    example_sample = action # Use the action as the sample
-    example_observation = np.array([15000.0], dtype=np.float64) # Dummy observation
+    # The size of the observation vector MUST match dim_out.
+    example_sample = action # Use the action as the sample (size should match dim_in)
+    example_observation = np.array([15000.0] * example_dim_out, dtype=np.float64) # size=dim_out
     print(f"\nCalling update with sample: {example_sample}, observation: {example_observation}")
     optimizer.update(example_sample, example_observation)
     print(" -> Update called.")
