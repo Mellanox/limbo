@@ -37,7 +37,7 @@ struct Params {
   };
 
   struct init_randomsampling {
-    BO_PARAM(int, samples, 50);
+    BO_PARAM(int, samples, 10);
   };
 
   struct stop_maxiterations {
@@ -51,11 +51,15 @@ struct Params {
   struct opt_rprop : public defaults::opt_rprop {};
 
   struct opt_parallelrepeater : public defaults::opt_parallelrepeater {
-    BO_PARAM(int, repeats, 10);
+    BO_PARAM(int, repeats, 5);
     BO_PARAM(double, epsilon, 1);
   };
   struct mean_constant : public defaults::mean_constant {
     BO_PARAM(double, constant, 0);
+  };
+
+  struct gp_hyperparam_coldstart {
+    BO_PARAM(bool, coldstart, true);
   };
 };
 
@@ -66,7 +70,7 @@ struct StateConfig {
 
 using kernel_t = kernel::SquaredExpARD<Params>;
 using mean_t = mean::Constant<Params>;
-using gp_opt_t = model::gp::KernelMeanLFOpt<Params>;
+using gp_opt_t = model::gp::KernelMeanLFOpt<Params, opt::ParallelRepeater<Params, opt::Rprop<Params>>>;
 using gp_t = model::GP<Params, kernel_t, mean_t, gp_opt_t>;
 using acqui_t = acqui::UCB<Params, gp_t>;
 using acqui_opt_t = opt::NLOptNoGrad<Params>;
