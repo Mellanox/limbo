@@ -64,10 +64,14 @@ namespace limbo {
                     Optimizer optimizer;
 
                     int dim = gp.kernel_function().h_params_size() + gp.mean_function().h_params_size();
-
                     Eigen::VectorXd init(dim);
-                    init.head(gp.kernel_function().h_params_size()) = gp.kernel_function().h_params();
-                    init.tail(gp.mean_function().h_params_size()) = gp.mean_function().h_params();
+
+                    if(Params::gp_hyperparam_coldstart::coldstart()) {
+                        init = tools::random_vector(dim, true);
+                    } else {
+                        init.head(gp.kernel_function().h_params_size()) = gp.kernel_function().h_params();
+                        init.tail(gp.mean_function().h_params_size()) = gp.mean_function().h_params();
+                    }
 
                     Eigen::VectorXd params = optimizer(optimization, init, false);
                     gp.kernel_function().set_h_params(params.head(gp.kernel_function().h_params_size()));
